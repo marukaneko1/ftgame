@@ -1,10 +1,18 @@
 import * as Joi from "joi";
 
+// In serverless (Vercel), make some vars optional to avoid startup crashes
+// They'll still fail at runtime when actually used, but we can log better errors
+const isServerless = !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+
 export const validationSchema = Joi.object({
   NODE_ENV: Joi.string().valid("development", "production", "test").default("development"),
   PORT: Joi.number().default(3001),
-  DATABASE_URL: Joi.string().uri().required().error(new Error('DATABASE_URL is required')),
-  REDIS_URL: Joi.string().uri().required().error(new Error('REDIS_URL is required')),
+  DATABASE_URL: isServerless 
+    ? Joi.string().uri().optional().allow("")
+    : Joi.string().uri().required().error(new Error('DATABASE_URL is required')),
+  REDIS_URL: isServerless
+    ? Joi.string().uri().optional().allow("")
+    : Joi.string().uri().required().error(new Error('REDIS_URL is required')),
   JWT_ACCESS_SECRET: Joi.string().min(16).required(),
   JWT_REFRESH_SECRET: Joi.string().min(16).required(),
   JWT_ACCESS_EXPIRES_IN: Joi.string().default("15m"),

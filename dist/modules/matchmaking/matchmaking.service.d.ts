@@ -12,10 +12,12 @@ interface QueueRequest {
 export declare class MatchmakingService implements OnModuleDestroy {
     private readonly prisma;
     private redis;
+    private readonly logger;
     private userQueues;
     private cleanupInterval;
     private readonly STALE_ENTRY_MS;
     constructor(prisma: PrismaService, configService: ConfigService);
+    private ensureRedis;
     private cleanupStaleEntries;
     onModuleDestroy(): void;
     joinQueue(userId: string, region: string, language: string, latitude?: number, longitude?: number): Promise<[QueueRequest, QueueRequest] | null>;

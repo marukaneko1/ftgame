@@ -11,27 +11,48 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
+var MatchmakingService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MatchmakingService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../../prisma/prisma.service");
 const ioredis_1 = __importDefault(require("ioredis"));
 const config_1 = require("@nestjs/config");
-let MatchmakingService = class MatchmakingService {
+let MatchmakingService = MatchmakingService_1 = class MatchmakingService {
     prisma;
-    redis;
+    redis = null;
+    logger = new common_1.Logger(MatchmakingService_1.name);
     userQueues = new Map();
     cleanupInterval = null;
     STALE_ENTRY_MS = 10 * 60 * 1000;
     constructor(prisma, configService) {
         this.prisma = prisma;
-        const redisUrl = configService.get("redisUrl") || "redis://localhost:6379";
-        this.redis = new ioredis_1.default(redisUrl);
-        this.cleanupInterval = setInterval(() => {
-            this.cleanupStaleEntries();
-        }, 5 * 60 * 1000);
+        const redisUrl = configService.get("redisUrl");
+        if (redisUrl) {
+            try {
+                this.redis = new ioredis_1.default(redisUrl);
+                this.logger.log('Redis connected successfully');
+                this.cleanupInterval = setInterval(() => {
+                    this.cleanupStaleEntries();
+                }, 5 * 60 * 1000);
+            }
+            catch (error) {
+                this.logger.warn(`Failed to connect to Redis: ${error?.message || 'Unknown error'}. Matchmaking will not work.`);
+            }
+        }
+        else {
+            this.logger.warn('REDIS_URL not configured. Matchmaking will not work.');
+        }
+    }
+    ensureRedis() {
+        if (!this.redis) {
+            throw new Error('Redis is not configured. REDIS_URL environment variable is required for matchmaking.');
+        }
+        return this.redis;
     }
     async cleanupStaleEntries() {
+        if (!this.redis)
+            return;
         const now = Date.now();
         const staleUserIds = [];
         for (const [userId, entry] of this.userQueues.entries()) {
@@ -104,14 +125,16 @@ let MatchmakingService = class MatchmakingService {
         }
         const key = this.queueKey(region, language);
         await this.leaveQueue(userId);
+        const redis = this.ensureRedis();
         const payload = { userId, region, language, latitude, longitude, enqueuedAt: Date.now() };
-        await this.redis.rpush(key, JSON.stringify(payload));
+        await redis.rpush(key, JSON.stringify(payload));
         this.userQueues.set(userId, { key, addedAt: Date.now() });
         const match = await this.findClosestMatch(userId, key, latitude, longitude);
         if (match) {
             return match;
         }
-        const length = await this.redis.llen(key);
+        const redisClient = this.ensureRedis();
+        const length = await redisClient.llen(key);
         console.log(`User ${userId} joined queue ${key}. Queue length: ${length}`);
         return null;
     }
@@ -120,9 +143,10 @@ let MatchmakingService = class MatchmakingService {
         let key = entry?.key;
         if (!key) {
             try {
-                const allQueueKeys = await this.redis.keys("match_queue:*");
+                const redisClient = this.ensureRedis();
+                const allQueueKeys = await redisClient.keys("match_queue:*");
                 for (const possibleKey of allQueueKeys) {
-                    const items = await this.redis.lrange(possibleKey, 0, -1);
+                    const items = await redisClient.lrange(possibleKey, 0, -1);
                     for (const item of items) {
                         try {
                             const parsed = JSON.parse(item);
@@ -145,13 +169,14 @@ let MatchmakingService = class MatchmakingService {
         }
         if (!key)
             return;
-        const items = await this.redis.lrange(key, 0, -1);
+        const redis = this.ensureRedis();
+        const items = await redis.lrange(key, 0, -1);
         let removed = 0;
         for (const item of items) {
             try {
                 const parsed = JSON.parse(item);
                 if (parsed.userId === userId) {
-                    const removedCount = await this.redis.lrem(key, 0, item);
+                    const removedCount = await redis.lrem(key, 0, item);
                     removed += removedCount;
                 }
             }
@@ -169,13 +194,14 @@ let MatchmakingService = class MatchmakingService {
         return this.findClosestMatch(userId, key, latitude, longitude);
     }
     async findClosestMatch(userId, queueKey, userLat, userLon) {
-        const length = await this.redis.llen(queueKey);
+        const redisClient = this.ensureRedis();
+        const length = await redisClient.llen(queueKey);
         console.log(`[Matchmaking] findClosestMatch for ${userId}, queue length: ${length}`);
         if (length < 2) {
             console.log(`[Matchmaking] Queue too short (${length} < 2)`);
             return null;
         }
-        const allItems = await this.redis.lrange(queueKey, 0, -1);
+        const allItems = await redisClient.lrange(queueKey, 0, -1);
         console.log(`[Matchmaking] Found ${allItems.length} items in queue`);
         const queueRequests = [];
         for (const item of allItems) {
@@ -246,16 +272,16 @@ let MatchmakingService = class MatchmakingService {
             return null;
         }
         try {
-            await this.redis.watch(queueKey);
-            const currentQueueItems = await this.redis.lrange(queueKey, 0, -1);
+            await redisClient.watch(queueKey);
+            const currentQueueItems = await redisClient.lrange(queueKey, 0, -1);
             const currentUserStillInQueue = currentQueueItems.includes(currentUserJson);
             const matchUserStillInQueue = currentQueueItems.includes(matchUserJson);
             if (!currentUserStillInQueue || !matchUserStillInQueue) {
-                await this.redis.unwatch();
+                await redisClient.unwatch();
                 console.log(`[Matchmaking] Users no longer in queue (current: ${currentUserStillInQueue}, match: ${matchUserStillInQueue})`);
                 return null;
             }
-            const pipeline = this.redis.multi();
+            const pipeline = redisClient.multi();
             pipeline.lrem(queueKey, 1, currentUserJson);
             pipeline.lrem(queueKey, 1, matchUserJson);
             const results = await pipeline.exec();
@@ -268,7 +294,7 @@ let MatchmakingService = class MatchmakingService {
             if (removed1 === 0 || removed2 === 0) {
                 console.log(`[Matchmaking] Removal failed in transaction (removed1: ${removed1}, removed2: ${removed2})`);
                 if (removed1 > 0 && removed2 === 0) {
-                    await this.redis.rpush(queueKey, currentUserJson);
+                    await redisClient.rpush(queueKey, currentUserJson);
                 }
                 return null;
             }
@@ -276,7 +302,9 @@ let MatchmakingService = class MatchmakingService {
         }
         catch (err) {
             console.error(`[Matchmaking] Transaction error:`, err);
-            await this.redis.unwatch();
+            if (this.redis) {
+                await this.redis.unwatch();
+            }
             return null;
         }
         this.userQueues.delete(userId);
@@ -319,7 +347,7 @@ let MatchmakingService = class MatchmakingService {
     }
 };
 exports.MatchmakingService = MatchmakingService;
-exports.MatchmakingService = MatchmakingService = __decorate([
+exports.MatchmakingService = MatchmakingService = MatchmakingService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService, config_1.ConfigService])
 ], MatchmakingService);

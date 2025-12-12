@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, OnModuleDestroy } from "@nestjs/common";
+import { Injectable, UnauthorizedException, OnModuleDestroy, Logger } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import Redis from "ioredis";
 import { ConfigService } from "@nestjs/config";
@@ -14,7 +14,8 @@ interface QueueRequest {
 
 @Injectable()
 export class MatchmakingService implements OnModuleDestroy {
-  private redis: Redis;
+  private redis: Redis | null = null;
+  private readonly logger = new Logger(MatchmakingService.name);
   // Track user -> queue key mapping (with timestamps for cleanup)
   private userQueues = new Map<string, { key: string; addedAt: number }>();
   // Cleanup interval (every 5 minutes, remove entries older than 10 minutes)
@@ -22,13 +23,32 @@ export class MatchmakingService implements OnModuleDestroy {
   private readonly STALE_ENTRY_MS = 10 * 60 * 1000; // 10 minutes
 
   constructor(private readonly prisma: PrismaService, configService: ConfigService) {
-    const redisUrl = configService.get<string>("redisUrl") || "redis://localhost:6379";
-    this.redis = new Redis(redisUrl);
-    
-    // Start periodic cleanup of stale userQueues entries
-    this.cleanupInterval = setInterval(() => {
-      this.cleanupStaleEntries();
-    }, 5 * 60 * 1000); // Every 5 minutes
+    const redisUrl = configService.get<string>("redisUrl");
+    if (redisUrl) {
+      try {
+        this.redis = new Redis(redisUrl);
+        this.logger.log('Redis connected successfully');
+        
+        // Start periodic cleanup of stale userQueues entries
+        this.cleanupInterval = setInterval(() => {
+          this.cleanupStaleEntries();
+        }, 5 * 60 * 1000); // Every 5 minutes
+      } catch (error: any) {
+        this.logger.warn(`Failed to connect to Redis: ${error?.message || 'Unknown error'}. Matchmaking will not work.`);
+      }
+    } else {
+      this.logger.warn('REDIS_URL not configured. Matchmaking will not work.');
+    }
+  }
+
+  /**
+   * Ensure Redis is available, throw helpful error if not
+   */
+  private ensureRedis(): Redis {
+    if (!this.redis) {
+      throw new Error('Redis is not configured. REDIS_URL environment variable is required for matchmaking.');
+    }
+    return this.redis;
   }
 
   /**
@@ -36,6 +56,8 @@ export class MatchmakingService implements OnModuleDestroy {
    * This prevents memory leaks when Redis is cleared or users disconnect without proper cleanup
    */
   private async cleanupStaleEntries() {
+    if (!this.redis) return; // Skip if Redis not available
+    
     const now = Date.now();
     const staleUserIds: string[] = [];
     
@@ -122,8 +144,9 @@ export class MatchmakingService implements OnModuleDestroy {
     // Remove user from queue first to prevent duplicates
     await this.leaveQueue(userId);
     
+    const redis = this.ensureRedis();
     const payload: QueueRequest = { userId, region, language, latitude, longitude, enqueuedAt: Date.now() };
-    await this.redis.rpush(key, JSON.stringify(payload));
+    await redis.rpush(key, JSON.stringify(payload));
     this.userQueues.set(userId, { key, addedAt: Date.now() });
     
     // Try to find the closest match
@@ -132,7 +155,8 @@ export class MatchmakingService implements OnModuleDestroy {
       return match;
     }
     
-    const length = await this.redis.llen(key);
+    const redisClient = this.ensureRedis();
+    const length = await redisClient.llen(key);
     console.log(`User ${userId} joined queue ${key}. Queue length: ${length}`);
     return null;
   }
@@ -146,10 +170,11 @@ export class MatchmakingService implements OnModuleDestroy {
     if (!key) {
       try {
         // Get all queue keys dynamically (handles any region/language combo)
-        const allQueueKeys = await this.redis.keys("match_queue:*");
+        const redisClient = this.ensureRedis();
+        const allQueueKeys = await redisClient.keys("match_queue:*");
         
         for (const possibleKey of allQueueKeys) {
-          const items = await this.redis.lrange(possibleKey, 0, -1);
+          const items = await redisClient.lrange(possibleKey, 0, -1);
           for (const item of items) {
             try {
               const parsed = JSON.parse(item);
@@ -171,13 +196,14 @@ export class MatchmakingService implements OnModuleDestroy {
     if (!key) return; // User not in any queue
     
     // Remove ALL occurrences of this user from the queue (handle duplicates)
-    const items = await this.redis.lrange(key, 0, -1);
+    const redis = this.ensureRedis();
+    const items = await redis.lrange(key, 0, -1);
     let removed = 0;
     for (const item of items) {
       try {
         const parsed = JSON.parse(item);
         if (parsed.userId === userId) {
-          const removedCount = await this.redis.lrem(key, 0, item);
+          const removedCount = await redis.lrem(key, 0, item);
           removed += removedCount;
         }
       } catch {
@@ -198,7 +224,8 @@ export class MatchmakingService implements OnModuleDestroy {
   }
 
   private async findClosestMatch(userId: string, queueKey: string, userLat?: number, userLon?: number): Promise<[QueueRequest, QueueRequest] | null> {
-    const length = await this.redis.llen(queueKey);
+    const redisClient = this.ensureRedis();
+    const length = await redisClient.llen(queueKey);
     console.log(`[Matchmaking] findClosestMatch for ${userId}, queue length: ${length}`);
     if (length < 2) {
       console.log(`[Matchmaking] Queue too short (${length} < 2)`);
@@ -206,7 +233,7 @@ export class MatchmakingService implements OnModuleDestroy {
     }
 
     // Get all users in queue
-    const allItems = await this.redis.lrange(queueKey, 0, -1);
+    const allItems = await redisClient.lrange(queueKey, 0, -1);
     console.log(`[Matchmaking] Found ${allItems.length} items in queue`);
     const queueRequests: Array<{ request: QueueRequest; distance: number }> = [];
     
@@ -293,21 +320,21 @@ export class MatchmakingService implements OnModuleDestroy {
     // Use Redis WATCH + MULTI/EXEC for atomic operation
     // This ensures that if the queue changes between our read and write, the transaction fails
     try {
-      await this.redis.watch(queueKey);
+      await redisClient.watch(queueKey);
       
       // Double-check both users are still in queue before removing
-      const currentQueueItems = await this.redis.lrange(queueKey, 0, -1);
+      const currentQueueItems = await redisClient.lrange(queueKey, 0, -1);
       const currentUserStillInQueue = currentQueueItems.includes(currentUserJson);
       const matchUserStillInQueue = currentQueueItems.includes(matchUserJson);
       
       if (!currentUserStillInQueue || !matchUserStillInQueue) {
-        await this.redis.unwatch();
+        await redisClient.unwatch();
         console.log(`[Matchmaking] Users no longer in queue (current: ${currentUserStillInQueue}, match: ${matchUserStillInQueue})`);
         return null;
       }
       
       // Execute atomic removal
-      const pipeline = this.redis.multi();
+      const pipeline = redisClient.multi();
       pipeline.lrem(queueKey, 1, currentUserJson);
       pipeline.lrem(queueKey, 1, matchUserJson);
       const results = await pipeline.exec();
@@ -327,7 +354,7 @@ export class MatchmakingService implements OnModuleDestroy {
         console.log(`[Matchmaking] Removal failed in transaction (removed1: ${removed1}, removed2: ${removed2})`);
         // Re-add current user if needed
         if (removed1 > 0 && removed2 === 0) {
-          await this.redis.rpush(queueKey, currentUserJson);
+          await redisClient.rpush(queueKey, currentUserJson);
         }
         return null;
       }
@@ -335,7 +362,9 @@ export class MatchmakingService implements OnModuleDestroy {
       console.log(`[Matchmaking] Successfully matched ${userId} with ${closestMatch.userId} (atomic)`);
     } catch (err) {
       console.error(`[Matchmaking] Transaction error:`, err);
-      await this.redis.unwatch();
+      if (this.redis) {
+        await this.redis.unwatch();
+      }
       return null;
     }
     this.userQueues.delete(userId);
