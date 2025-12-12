@@ -5,14 +5,14 @@ export declare class ReportsService {
     constructor(prisma: PrismaService);
     createReport(reporterUserId: string, reportedUserId: string, reasonCode: ReportReason | string, comment?: string, sessionId?: string, roomId?: string): Promise<{
         reporter: {
-            id: string;
-            username: string;
             displayName: string;
+            username: string;
+            id: string;
         };
         reported: {
-            id: string;
-            username: string;
             displayName: string;
+            username: string;
+            id: string;
         };
     } & {
         id: string;
@@ -27,9 +27,9 @@ export declare class ReportsService {
     }>;
     getReportsByUser(userId: string, limit?: number): Promise<({
         reported: {
-            id: string;
-            username: string;
             displayName: string;
+            username: string;
+            id: string;
         };
     } & {
         id: string;
@@ -44,9 +44,9 @@ export declare class ReportsService {
     })[]>;
     getReportsAgainstUser(userId: string, limit?: number): Promise<({
         reporter: {
-            id: string;
-            username: string;
             displayName: string;
+            username: string;
+            id: string;
         };
     } & {
         id: string;
@@ -65,14 +65,14 @@ export declare class ReportsService {
             createdAt: Date;
         } | null;
         reporter: {
-            id: string;
-            username: string;
             displayName: string;
+            username: string;
+            id: string;
         };
         reported: {
-            id: string;
-            username: string;
             displayName: string;
+            username: string;
+            id: string;
         };
     } & {
         id: string;

@@ -15,12 +15,12 @@ export declare class AdminService {
                 id: string;
                 balanceTokens: number;
             } | null;
-            id: string;
             email: string;
-            username: string;
             displayName: string;
-            avatarUrl: string | null;
+            username: string;
             dateOfBirth: Date | null;
+            id: string;
+            avatarUrl: string | null;
             is18PlusVerified: boolean;
             kycStatus: import(".prisma/client").$Enums.KycStatus;
             level: number;
@@ -54,12 +54,12 @@ export declare class AdminService {
             updatedAt: Date;
             balanceTokens: number;
         } | null;
-        id: string;
         email: string;
-        username: string;
         displayName: string;
-        avatarUrl: string | null;
+        username: string;
         dateOfBirth: Date | null;
+        id: string;
+        avatarUrl: string | null;
         is18PlusVerified: boolean;
         kycStatus: import(".prisma/client").$Enums.KycStatus;
         level: number;
@@ -108,16 +108,16 @@ export declare class AdminService {
             createdAt: Date;
             status: import(".prisma/client").$Enums.ReportStatus;
             reporter: {
-                id: string;
                 email: string;
-                username: string;
                 displayName: string;
+                username: string;
+                id: string;
             };
             reported: {
-                id: string;
                 email: string;
-                username: string;
                 displayName: string;
+                username: string;
+                id: string;
                 isBanned: boolean;
             };
             reasonCode: import(".prisma/client").$Enums.ReportReason;
@@ -139,16 +139,16 @@ export declare class AdminService {
             endReason: import(".prisma/client").$Enums.SessionEndReason | null;
         } | null;
         reporter: {
-            id: string;
             email: string;
-            username: string;
             displayName: string;
+            username: string;
+            id: string;
         };
         reported: {
-            id: string;
             email: string;
-            username: string;
             displayName: string;
+            username: string;
+            id: string;
             isBanned: boolean;
             banReason: string | null;
         };

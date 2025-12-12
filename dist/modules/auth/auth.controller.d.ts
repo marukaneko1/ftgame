@@ -4,7 +4,7 @@ import { LoginDto } from "./dto/login.dto";
 import { GoogleLoginDto } from "./dto/google-login.dto";
 import { RefreshDto } from "./dto/refresh.dto";
 import { Request, Response } from "express";
-import { JwtPayload } from "@omegle-game/shared/src/types/auth";
+import { JwtPayload } from "../../common/types/auth";
 export declare class AuthController {
     private readonly authService;
     constructor(authService: AuthService);

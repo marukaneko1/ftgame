@@ -1,5 +1,5 @@
 import { VideoService } from "./video.service";
-import { JwtPayload } from "@omegle-game/shared/src/types/auth";
+import { JwtPayload } from "../../common/types/auth";
 export declare class VideoController {
     private readonly videoService;
     constructor(videoService: VideoService);

@@ -16,7 +16,7 @@ import { RefreshDto } from "./dto/refresh.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { Request, Response } from "express";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
-import { JwtPayload } from "@omegle-game/shared/src/types/auth";
+import { JwtPayload } from "../../common/types/auth";
 
 @Controller("auth")
 export class AuthController {

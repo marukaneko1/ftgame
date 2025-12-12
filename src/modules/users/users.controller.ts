@@ -3,7 +3,7 @@ import { IsNumber, IsNotEmpty } from "class-validator";
 import { UsersService } from "./users.service";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
-import { JwtPayload } from "@omegle-game/shared/src/types/auth";
+import { JwtPayload } from "../../common/types/auth";
 
 class UpdateLocationDto {
   @IsNumber()

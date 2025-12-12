@@ -1,5 +1,5 @@
 import { WalletService } from "./wallet.service";
-import { JwtPayload } from "@omegle-game/shared/src/types/auth";
+import { JwtPayload } from "../../common/types/auth";
 import { TokenPackDto } from "./dto/token-pack.dto";
 import { Request } from "express";
 export declare class WalletController {
@@ -9,20 +9,20 @@ export declare class WalletController {
         transactions: {
             id: string;
             createdAt: Date;
+            walletId: string;
             type: import(".prisma/client").$Enums.WalletTransactionType;
             amountTokens: number;
-            metadata: import("@prisma/client/runtime/library").JsonValue | null;
             sessionId: string | null;
             gameId: string | null;
             roomId: string | null;
-            walletId: string;
+            metadata: import("@prisma/client/runtime/library").JsonValue | null;
         }[];
     } & {
         id: string;
         createdAt: Date;
-        updatedAt: Date;
-        balanceTokens: number;
         userId: string;
+        balanceTokens: number;
+        updatedAt: Date;
     }) | null>;
     tokenPack(user: JwtPayload, dto: TokenPackDto): Promise<{
         checkoutUrl: string | null;

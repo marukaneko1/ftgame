@@ -1,5 +1,5 @@
 import { UsersService } from "./users.service";
-import { JwtPayload } from "@omegle-game/shared/src/types/auth";
+import { JwtPayload } from "../../common/types/auth";
 declare class UpdateLocationDto {
     latitude: number;
     longitude: number;
@@ -8,23 +8,23 @@ export declare class UsersController {
     private readonly usersService;
     constructor(usersService: UsersService);
     me(user: JwtPayload): Promise<{
-        subscription: {
-            id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            status: import(".prisma/client").$Enums.SubscriptionStatus;
-            stripeSubscriptionId: string | null;
-            startedAt: Date | null;
-            currentPeriodEnd: Date | null;
-            userId: string;
-        } | null;
+        id: string;
         wallet: {
             id: string;
             createdAt: Date;
-            updatedAt: Date;
             balanceTokens: number;
+            updatedAt: Date;
         } | null;
-        id: string;
+        subscription: {
+            id: string;
+            status: import(".prisma/client").$Enums.SubscriptionStatus;
+            startedAt: Date | null;
+            createdAt: Date;
+            userId: string;
+            updatedAt: Date;
+            stripeSubscriptionId: string | null;
+            currentPeriodEnd: Date | null;
+        } | null;
         email: string;
         username: string;
         displayName: string;

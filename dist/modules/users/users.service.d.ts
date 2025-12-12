@@ -19,12 +19,12 @@ export declare class UsersService {
             updatedAt: Date;
             balanceTokens: number;
         } | null;
-        id: string;
         email: string;
-        username: string;
         displayName: string;
-        avatarUrl: string | null;
+        username: string;
         dateOfBirth: Date | null;
+        id: string;
+        avatarUrl: string | null;
         is18PlusVerified: boolean;
         kycStatus: import(".prisma/client").$Enums.KycStatus;
         level: number;

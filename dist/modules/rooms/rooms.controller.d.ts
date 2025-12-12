@@ -27,59 +27,59 @@ export declare class RoomsController {
         status: import(".prisma/client").$Enums.RoomStatus;
         currentRound: {
             id: string;
-            entryFeeTokens: number;
-            status: import(".prisma/client").$Enums.RoundStatus;
             createdAt: Date;
-            endedAt: Date | null;
+            status: import(".prisma/client").$Enums.RoundStatus;
+            startedAt: Date | null;
+            gameId: string | null;
             roomId: string;
+            endedAt: Date | null;
+            winnerId: string | null;
+            entryFeeTokens: number;
             roundNumber: number;
             poolTokens: number;
             gameType: import(".prisma/client").$Enums.GameType | null;
-            gameId: string | null;
-            winnerId: string | null;
             votingEndsAt: Date | null;
-            startedAt: Date | null;
         };
     }[]>;
     getRoomDetails(id: string): Promise<import("./rooms.types").RoomWithParticipants>;
     createRoom(req: any, body: CreateRoomBody): Promise<{
-        host: {
-            id: string;
-            displayName: string;
-            username: string;
-        };
         participants: ({
             user: {
-                id: string;
-                displayName: string;
-                username: string;
                 wallet: {
                     balanceTokens: number;
                 } | null;
+                displayName: string;
+                username: string;
+                id: string;
             };
         } & {
             id: string;
+            userId: string;
+            roomId: string;
             role: import(".prisma/client").$Enums.RoomRole;
             tokensInPool: number;
             joinedAt: Date;
             leftAt: Date | null;
-            userId: string;
-            roomId: string;
         })[];
+        host: {
+            displayName: string;
+            username: string;
+            id: string;
+        };
     } & {
         id: string;
+        passwordHash: string | null;
+        createdAt: Date;
+        status: import(".prisma/client").$Enums.RoomStatus;
+        endedAt: Date | null;
+        videoChannelName: string;
         title: string;
         description: string | null;
-        passwordHash: string | null;
         maxMembers: number;
         region: string;
         entryFeeTokens: number;
-        status: import(".prisma/client").$Enums.RoomStatus;
-        videoChannelName: string;
         isPublic: boolean;
         currentRoundId: string | null;
-        createdAt: Date;
-        endedAt: Date | null;
         hostUserId: string;
     }>;
     joinRoom(req: any, id: string, body: JoinRoomBody): Promise<import("./rooms.types").RoomWithParticipants>;

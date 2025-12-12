@@ -15,6 +15,7 @@ const chess_module_1 = require("./chess/chess.module");
 const chess_service_1 = require("./chess/chess.service");
 const trivia_module_1 = require("./trivia/trivia.module");
 const trivia_service_1 = require("./trivia/trivia.service");
+const trivia_timer_service_1 = require("./trivia/trivia.timer.service");
 const prisma_module_1 = require("../../prisma/prisma.module");
 let GamesModule = class GamesModule {
 };
@@ -22,8 +23,8 @@ exports.GamesModule = GamesModule;
 exports.GamesModule = GamesModule = __decorate([
     (0, common_1.Module)({
         imports: [prisma_module_1.PrismaModule, tictactoe_module_1.TicTacToeModule, chess_module_1.ChessModule, trivia_module_1.TriviaModule],
-        providers: [games_service_1.GamesService, tictactoe_service_1.TicTacToeService, chess_service_1.ChessService, trivia_service_1.TriviaService],
-        exports: [games_service_1.GamesService, tictactoe_service_1.TicTacToeService, chess_service_1.ChessService, trivia_service_1.TriviaService]
+        providers: [games_service_1.GamesService, tictactoe_service_1.TicTacToeService, chess_service_1.ChessService, trivia_service_1.TriviaService, trivia_timer_service_1.TriviaTimerService],
+        exports: [games_service_1.GamesService, tictactoe_service_1.TicTacToeService, chess_service_1.ChessService, trivia_service_1.TriviaService, trivia_timer_service_1.TriviaTimerService]
     })
 ], GamesModule);
 //# sourceMappingURL=games.module.js.map

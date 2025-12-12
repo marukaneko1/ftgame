@@ -1,18 +1,18 @@
 import { SubscriptionsService } from "./subscriptions.service";
-import { JwtPayload } from "@omegle-game/shared/src/types/auth";
+import { JwtPayload } from "../../common/types/auth";
 import { Request } from "express";
 export declare class SubscriptionsController {
     private readonly subscriptionsService;
     constructor(subscriptionsService: SubscriptionsService);
     me(user: JwtPayload): Promise<{
         id: string;
-        createdAt: Date;
-        updatedAt: Date;
         status: import(".prisma/client").$Enums.SubscriptionStatus;
-        stripeSubscriptionId: string | null;
         startedAt: Date | null;
-        currentPeriodEnd: Date | null;
+        createdAt: Date;
         userId: string;
+        updatedAt: Date;
+        stripeSubscriptionId: string | null;
+        currentPeriodEnd: Date | null;
     } | null>;
     basicCheckout(user: JwtPayload): Promise<{
         checkoutUrl: string | null;

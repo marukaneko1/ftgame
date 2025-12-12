@@ -6,12 +6,13 @@ import { ChessModule } from "./chess/chess.module";
 import { ChessService } from "./chess/chess.service";
 import { TriviaModule } from "./trivia/trivia.module";
 import { TriviaService } from "./trivia/trivia.service";
+import { TriviaTimerService } from "./trivia/trivia.timer.service";
 import { PrismaModule } from "../../prisma/prisma.module";
 
 @Module({
   imports: [PrismaModule, TicTacToeModule, ChessModule, TriviaModule],
-  providers: [GamesService, TicTacToeService, ChessService, TriviaService],
-  exports: [GamesService, TicTacToeService, ChessService, TriviaService]
+  providers: [GamesService, TicTacToeService, ChessService, TriviaService, TriviaTimerService],
+  exports: [GamesService, TicTacToeService, ChessService, TriviaService, TriviaTimerService]
 })
 export class GamesModule {}
 

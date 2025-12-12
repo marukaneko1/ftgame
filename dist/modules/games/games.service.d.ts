@@ -13,57 +13,57 @@ export declare class GamesService {
         players: {
             id: string;
             createdAt: Date;
-            side: string;
-            score: number;
             result: string | null;
             userId: string;
             gameId: string;
+            side: string;
+            score: number;
         }[];
     } & {
-        type: import(".prisma/client").$Enums.GameType;
         id: string;
-        status: import(".prisma/client").$Enums.GameStatus;
-        state: import("@prisma/client/runtime/library").JsonValue | null;
-        startedAt: Date | null;
-        endedAt: Date | null;
         createdAt: Date;
+        status: import(".prisma/client").$Enums.GameStatus;
+        startedAt: Date | null;
+        type: import(".prisma/client").$Enums.GameType;
         sessionId: string | null;
+        endedAt: Date | null;
+        state: import("@prisma/client/runtime/library").JsonValue | null;
         winnerUserId: string | null;
     }>;
     startGame(gameId: string): Promise<{
         players: ({
             user: {
-                id: string;
                 displayName: string;
                 username: string;
+                id: string;
             };
         } & {
             id: string;
             createdAt: Date;
-            side: string;
-            score: number;
             result: string | null;
             userId: string;
             gameId: string;
+            side: string;
+            score: number;
         })[];
     } & {
-        type: import(".prisma/client").$Enums.GameType;
         id: string;
-        status: import(".prisma/client").$Enums.GameStatus;
-        state: import("@prisma/client/runtime/library").JsonValue | null;
-        startedAt: Date | null;
-        endedAt: Date | null;
         createdAt: Date;
+        status: import(".prisma/client").$Enums.GameStatus;
+        startedAt: Date | null;
+        type: import(".prisma/client").$Enums.GameType;
         sessionId: string | null;
+        endedAt: Date | null;
+        state: import("@prisma/client/runtime/library").JsonValue | null;
         winnerUserId: string | null;
     }>;
     getGame(gameId: string): Promise<{
         session: {
             id: string;
+            createdAt: Date;
             status: import(".prisma/client").$Enums.SessionStatus;
             startedAt: Date | null;
             endedAt: Date | null;
-            createdAt: Date;
             endReason: import(".prisma/client").$Enums.SessionEndReason | null;
             videoChannelName: string;
             userAId: string;
@@ -71,66 +71,66 @@ export declare class GamesService {
         } | null;
         players: ({
             user: {
-                id: string;
                 displayName: string;
                 username: string;
+                id: string;
             };
         } & {
             id: string;
             createdAt: Date;
-            side: string;
-            score: number;
             result: string | null;
             userId: string;
             gameId: string;
+            side: string;
+            score: number;
         })[];
     } & {
-        type: import(".prisma/client").$Enums.GameType;
         id: string;
-        status: import(".prisma/client").$Enums.GameStatus;
-        state: import("@prisma/client/runtime/library").JsonValue | null;
-        startedAt: Date | null;
-        endedAt: Date | null;
         createdAt: Date;
+        status: import(".prisma/client").$Enums.GameStatus;
+        startedAt: Date | null;
+        type: import(".prisma/client").$Enums.GameType;
         sessionId: string | null;
+        endedAt: Date | null;
+        state: import("@prisma/client/runtime/library").JsonValue | null;
         winnerUserId: string | null;
     }>;
     cancelGame(gameId: string): Promise<{
-        type: import(".prisma/client").$Enums.GameType;
         id: string;
-        status: import(".prisma/client").$Enums.GameStatus;
-        state: import("@prisma/client/runtime/library").JsonValue | null;
-        startedAt: Date | null;
-        endedAt: Date | null;
         createdAt: Date;
+        status: import(".prisma/client").$Enums.GameStatus;
+        startedAt: Date | null;
+        type: import(".prisma/client").$Enums.GameType;
         sessionId: string | null;
+        endedAt: Date | null;
+        state: import("@prisma/client/runtime/library").JsonValue | null;
         winnerUserId: string | null;
     }>;
     getActiveGameForSession(sessionId: string): Promise<({
         players: ({
             user: {
-                id: string;
                 displayName: string;
                 username: string;
+                id: string;
             };
         } & {
             id: string;
             createdAt: Date;
-            side: string;
-            score: number;
             result: string | null;
             userId: string;
             gameId: string;
+            side: string;
+            score: number;
         })[];
     } & {
-        type: import(".prisma/client").$Enums.GameType;
         id: string;
-        status: import(".prisma/client").$Enums.GameStatus;
-        state: import("@prisma/client/runtime/library").JsonValue | null;
-        startedAt: Date | null;
-        endedAt: Date | null;
         createdAt: Date;
+        status: import(".prisma/client").$Enums.GameStatus;
+        startedAt: Date | null;
+        type: import(".prisma/client").$Enums.GameType;
         sessionId: string | null;
+        endedAt: Date | null;
+        state: import("@prisma/client/runtime/library").JsonValue | null;
         winnerUserId: string | null;
     }) | null>;
 }
