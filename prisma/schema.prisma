@@ -1,0 +1,408 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum KycStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  INACTIVE
+  CANCELED
+}
+
+enum WalletTransactionType {
+  PURCHASE
+  GIFT_SENT
+  GIFT_RECEIVED
+  WAGER_LOCK
+  WAGER_PAYOUT
+  REFUND
+}
+
+enum SessionStatus {
+  MATCHING
+  CONNECTED
+  ENDED
+}
+
+enum SessionEndReason {
+  USER_LEFT
+  TIMEOUT
+  REPORT
+  ERROR
+}
+
+enum GameType {
+  CHESS
+  TRIVIA
+  TICTACTOE
+}
+
+enum GameStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELED
+}
+
+enum WagerStatus {
+  PENDING_LOCK
+  LOCKED
+  PAID_OUT
+  REFUNDED
+  CANCELED
+}
+
+enum RoomStatus {
+  LIVE
+  VOTING
+  IN_GAME
+  ENDED
+}
+
+enum RoomRole {
+  HOST
+  PLAYER
+  SPECTATOR
+}
+
+enum RoundStatus {
+  WAITING
+  VOTING
+  IN_GAME
+  COMPLETED
+  CANCELED
+}
+
+enum ReportReason {
+  HARASSMENT
+  NSFW
+  SPAM
+  UNDERAGE
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWED
+  ACTIONED
+}
+
+enum ModerationActionType {
+  WARNING
+  TEMPORARY_BAN
+  PERMANENT_BAN
+}
+
+model User {
+  id               String             @id @default(uuid())
+  email            String             @unique
+  passwordHash     String?
+  googleId         String?            @unique
+  displayName      String
+  username         String             @unique
+  avatarUrl        String?
+  dateOfBirth      DateTime?
+  is18PlusVerified Boolean            @default(false)
+  kycStatus        KycStatus          @default(PENDING)
+  level            Int                @default(1)
+  xp               Int                @default(0)
+  isBanned         Boolean            @default(false)
+  banReason        String?
+  isAdmin          Boolean            @default(false)
+  latitude         Float?
+  longitude        Float?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  interests        UserInterest[]
+  refreshTokens    RefreshToken[]
+  subscription     Subscription?
+  wallet           Wallet?
+  sessionsA        Session[]          @relation("SessionsA")
+  sessionsB        Session[]          @relation("SessionsB")
+  reportsMade      Report[]           @relation("ReportsMade")
+  reportsReceived  Report[]           @relation("ReportsReceived")
+  moderationTaken  ModerationAction[] @relation("Moderator")
+  moderationOnUser ModerationAction[] @relation("ModeratedUser")
+  roomParticipants RoomParticipant[]
+  gamePlayers      GamePlayer[]
+  wagers           WagerParticipant[]
+  gamesWon         Game[]             @relation("GameWinner")
+  roomsHosted      Room[]             @relation("RoomsHosted")
+}
+
+model UserInterest {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  key       String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Subscription {
+  id                   String             @id @default(uuid())
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId               String             @unique
+  status               SubscriptionStatus @default(INACTIVE)
+  stripeSubscriptionId String?
+  startedAt            DateTime?
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+}
+
+model Wallet {
+  id            String              @id @default(uuid())
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String              @unique
+  balanceTokens Int                 @default(0)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  transactions  WalletTransaction[]
+}
+
+model WalletTransaction {
+  id           String                @id @default(uuid())
+  wallet       Wallet                @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  walletId     String
+  type         WalletTransactionType
+  amountTokens Int
+  session      Session?              @relation(fields: [sessionId], references: [id])
+  sessionId    String?
+  game         Game?                 @relation(fields: [gameId], references: [id])
+  gameId       String?
+  room         Room?                 @relation(fields: [roomId], references: [id])
+  roomId       String?
+  metadata     Json?
+  createdAt    DateTime              @default(now())
+
+  @@index([walletId])
+}
+
+model Session {
+  id               String            @id @default(uuid())
+  userA            User              @relation("SessionsA", fields: [userAId], references: [id])
+  userAId          String
+  userB            User              @relation("SessionsB", fields: [userBId], references: [id])
+  userBId          String
+  status           SessionStatus     @default(MATCHING)
+  startedAt        DateTime?
+  endedAt          DateTime?
+  endReason        SessionEndReason?
+  videoChannelName String
+  createdAt        DateTime          @default(now())
+
+  games               Game[]
+  walletTransactions  WalletTransaction[]
+  reports             Report[]
+
+  @@index([userAId])
+  @@index([userBId])
+}
+
+model Game {
+  id                 String              @id @default(uuid())
+  type               GameType
+  session            Session?            @relation(fields: [sessionId], references: [id])
+  sessionId          String?
+  status             GameStatus          @default(PENDING)
+  state              Json?
+  startedAt          DateTime?
+  endedAt            DateTime?
+  winner             User?               @relation("GameWinner", fields: [winnerUserId], references: [id])
+  winnerUserId       String?
+  createdAt          DateTime            @default(now())
+
+  players            GamePlayer[]
+  wager              Wager?
+  walletTransactions WalletTransaction[]
+}
+
+model GamePlayer {
+  id        String   @id @default(uuid())
+  game      Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  side      String
+  score     Int      @default(0)
+  result    String?
+  createdAt DateTime @default(now())
+
+  @@index([gameId])
+  @@index([userId])
+}
+
+model Wager {
+  id             String       @id @default(uuid())
+  game           Game         @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId         String       @unique
+  status         WagerStatus  @default(PENDING_LOCK)
+  totalPotTokens Int          @default(0)
+  rakeTokens     Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  participants   WagerParticipant[]
+}
+
+model WagerParticipant {
+  id          String   @id @default(uuid())
+  wager       Wager    @relation(fields: [wagerId], references: [id], onDelete: Cascade)
+  wagerId     String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  stakeTokens Int
+  createdAt   DateTime @default(now())
+
+  @@index([wagerId])
+  @@index([userId])
+}
+
+model Room {
+  id                 String              @id @default(uuid())
+  host               User                @relation("RoomsHosted", fields: [hostUserId], references: [id])
+  hostUserId         String
+  title              String
+  description        String?
+  passwordHash       String?             // Optional room password (hashed)
+  maxMembers         Int                 @default(8)
+  region             String              @default("global")
+  entryFeeTokens     Int                 @default(0)  // 0 = free entry
+  status             RoomStatus          @default(LIVE)
+  videoChannelName   String
+  isPublic           Boolean             @default(true)
+  currentRoundId     String?
+  createdAt          DateTime            @default(now())
+  endedAt            DateTime?
+
+  participants       RoomParticipant[]
+  rounds             RoomRound[]
+  walletTransactions WalletTransaction[]
+  reports            Report[]
+
+  @@index([status])
+  @@index([region])
+}
+
+model RoomParticipant {
+  id              String   @id @default(uuid())
+  room            Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  roomId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId          String
+  role            RoomRole @default(PLAYER)
+  tokensInPool    Int      @default(0)  // Tokens this user has contributed to current round
+  joinedAt        DateTime @default(now())
+  leftAt          DateTime?
+
+  roundParticipants RoundParticipant[]
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([userId])
+}
+
+model RoomRound {
+  id              String        @id @default(uuid())
+  room            Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  roomId          String
+  roundNumber     Int
+  entryFeeTokens  Int           @default(0)
+  poolTokens      Int           @default(0)
+  status          RoundStatus   @default(WAITING)
+  gameType        GameType?
+  gameId          String?       // Reference to the actual game
+  winnerId        String?
+  votingEndsAt    DateTime?
+  createdAt       DateTime      @default(now())
+  startedAt       DateTime?
+  endedAt         DateTime?
+
+  participants    RoundParticipant[]
+  votes           RoundVote[]
+
+  @@index([roomId])
+}
+
+model RoundParticipant {
+  id              String          @id @default(uuid())
+  round           RoomRound       @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  roundId         String
+  roomParticipant RoomParticipant @relation(fields: [roomParticipantId], references: [id], onDelete: Cascade)
+  roomParticipantId String
+  tokensStaked    Int             @default(0)
+  result          String?         // "win", "loss", "draw"
+  joinedAt        DateTime        @default(now())
+
+  @@unique([roundId, roomParticipantId])
+  @@index([roundId])
+}
+
+model RoundVote {
+  id        String     @id @default(uuid())
+  round     RoomRound  @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  roundId   String
+  odUserId  String
+  gameType  GameType
+  createdAt DateTime   @default(now())
+
+  @@unique([roundId, odUserId])
+  @@index([roundId])
+}
+
+model Report {
+  id             String        @id @default(uuid())
+  reporter       User          @relation("ReportsMade", fields: [reporterUserId], references: [id])
+  reporterUserId String
+  reported       User          @relation("ReportsReceived", fields: [reportedUserId], references: [id])
+  reportedUserId String
+  session        Session?      @relation(fields: [sessionId], references: [id])
+  sessionId      String?
+  room           Room?         @relation(fields: [roomId], references: [id])
+  roomId         String?
+  reasonCode     ReportReason
+  comment        String?
+  status         ReportStatus  @default(OPEN)
+  createdAt      DateTime      @default(now())
+
+  @@index([reporterUserId])
+  @@index([reportedUserId])
+}
+
+model ModerationAction {
+  id           String               @id @default(uuid())
+  moderator    User                 @relation("Moderator", fields: [adminUserId], references: [id])
+  adminUserId  String
+  targetUser   User                 @relation("ModeratedUser", fields: [targetUserId], references: [id])
+  targetUserId String
+  actionType   ModerationActionType
+  reason       String
+  createdAt    DateTime             @default(now())
+  expiresAt    DateTime?
+}
+
