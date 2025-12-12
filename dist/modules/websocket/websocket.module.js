@@ -19,7 +19,6 @@ const wallet_module_1 = require("../wallet/wallet.module");
 const reports_module_1 = require("../reports/reports.module");
 const games_module_1 = require("../games/games.module");
 const rooms_module_1 = require("../rooms/rooms.module");
-const trivia_module_1 = require("../games/trivia/trivia.module");
 let WebsocketModule = class WebsocketModule {
 };
 exports.WebsocketModule = WebsocketModule;
@@ -31,7 +30,6 @@ exports.WebsocketModule = WebsocketModule = __decorate([
             wallet_module_1.WalletModule,
             reports_module_1.ReportsModule,
             games_module_1.GamesModule,
-            trivia_module_1.TriviaModule,
             rooms_module_1.RoomsModule,
             jwt_1.JwtModule.registerAsync({
                 imports: [config_1.ConfigModule],

@@ -10,7 +10,6 @@ import { WalletModule } from "../wallet/wallet.module";
 import { ReportsModule } from "../reports/reports.module";
 import { GamesModule } from "../games/games.module";
 import { RoomsModule } from "../rooms/rooms.module";
-import { TriviaModule } from "../games/trivia/trivia.module";
 
 @Module({
   imports: [
@@ -19,7 +18,6 @@ import { TriviaModule } from "../games/trivia/trivia.module";
     WalletModule,
     ReportsModule,
     GamesModule,
-    TriviaModule,
     RoomsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
