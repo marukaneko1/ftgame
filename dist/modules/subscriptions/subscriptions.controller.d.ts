@@ -6,13 +6,13 @@ export declare class SubscriptionsController {
     constructor(subscriptionsService: SubscriptionsService);
     me(user: JwtPayload): Promise<{
         id: string;
-        status: import(".prisma/client").$Enums.SubscriptionStatus;
-        startedAt: Date | null;
         createdAt: Date;
-        userId: string;
         updatedAt: Date;
+        status: import(".prisma/client").$Enums.SubscriptionStatus;
         stripeSubscriptionId: string | null;
+        startedAt: Date | null;
         currentPeriodEnd: Date | null;
+        userId: string;
     } | null>;
     basicCheckout(user: JwtPayload): Promise<{
         checkoutUrl: string | null;

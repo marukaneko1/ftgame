@@ -9,20 +9,20 @@ export declare class WalletController {
         transactions: {
             id: string;
             createdAt: Date;
-            walletId: string;
             type: import(".prisma/client").$Enums.WalletTransactionType;
             amountTokens: number;
+            metadata: import("@prisma/client/runtime/library").JsonValue | null;
             sessionId: string | null;
             gameId: string | null;
             roomId: string | null;
-            metadata: import("@prisma/client/runtime/library").JsonValue | null;
+            walletId: string;
         }[];
     } & {
         id: string;
         createdAt: Date;
-        userId: string;
-        balanceTokens: number;
         updatedAt: Date;
+        balanceTokens: number;
+        userId: string;
     }) | null>;
     tokenPack(user: JwtPayload, dto: TokenPackDto): Promise<{
         checkoutUrl: string | null;

@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+// @ts-ignore - dist folder exists after build
 import { AppModule } from '../dist/app.module';
 import { ExpressAdapter } from '@nestjs/platform-express';
 const express = require('express');
