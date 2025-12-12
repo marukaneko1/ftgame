@@ -38,8 +38,8 @@ const Joi = __importStar(require("joi"));
 exports.validationSchema = Joi.object({
     NODE_ENV: Joi.string().valid("development", "production", "test").default("development"),
     PORT: Joi.number().default(3001),
-    DATABASE_URL: Joi.string().uri().required(),
-    REDIS_URL: Joi.string().uri().required(),
+    DATABASE_URL: Joi.string().uri().required().error(new Error('DATABASE_URL is required')),
+    REDIS_URL: Joi.string().uri().required().error(new Error('REDIS_URL is required')),
     JWT_ACCESS_SECRET: Joi.string().min(16).required(),
     JWT_REFRESH_SECRET: Joi.string().min(16).required(),
     JWT_ACCESS_EXPIRES_IN: Joi.string().default("15m"),
