@@ -7,7 +7,9 @@ const express_1 = require("express");
 const app_module_1 = require("./app.module");
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule);
-    app.setGlobalPrefix("api");
+    if (!process.env.VERCEL) {
+        app.setGlobalPrefix("api");
+    }
     app.enableCors({
         origin: process.env.WEB_BASE_URL || "http://localhost:3000",
         credentials: true,

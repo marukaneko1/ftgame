@@ -6,7 +6,10 @@ import { AppModule } from "./app.module";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.setGlobalPrefix("api");
+  // Don't set global prefix in serverless mode (Vercel)
+  if (!process.env.VERCEL) {
+    app.setGlobalPrefix("api");
+  }
   
   // Enable CORS for frontend
   app.enableCors({

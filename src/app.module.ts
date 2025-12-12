@@ -11,6 +11,7 @@ import { WebsocketModule } from "./modules/websocket/websocket.module";
 import { VideoModule } from "./modules/video/video.module";
 import { AdminModule } from "./modules/admin/admin.module";
 import { RoomsModule } from "./modules/rooms/rooms.module";
+import { HealthController } from "./common/health.controller";
 
 @Module({
   imports: [
@@ -28,7 +29,8 @@ import { RoomsModule } from "./modules/rooms/rooms.module";
     VideoModule,
     AdminModule,
     RoomsModule
-  ]
+  ],
+  controllers: [HealthController]
 })
 export class AppModule {}
 

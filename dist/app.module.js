@@ -20,6 +20,7 @@ const websocket_module_1 = require("./modules/websocket/websocket.module");
 const video_module_1 = require("./modules/video/video.module");
 const admin_module_1 = require("./modules/admin/admin.module");
 const rooms_module_1 = require("./modules/rooms/rooms.module");
+const health_controller_1 = require("./common/health.controller");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -40,7 +41,8 @@ exports.AppModule = AppModule = __decorate([
             video_module_1.VideoModule,
             admin_module_1.AdminModule,
             rooms_module_1.RoomsModule
-        ]
+        ],
+        controllers: [health_controller_1.HealthController]
     })
 ], AppModule);
 //# sourceMappingURL=app.module.js.map
