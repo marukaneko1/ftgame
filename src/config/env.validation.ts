@@ -13,8 +13,12 @@ export const validationSchema = Joi.object({
   REDIS_URL: isServerless
     ? Joi.string().uri().optional().allow("")
     : Joi.string().uri().required().error(new Error('REDIS_URL is required')),
-  JWT_ACCESS_SECRET: Joi.string().min(16).required(),
-  JWT_REFRESH_SECRET: Joi.string().min(16).required(),
+  JWT_ACCESS_SECRET: isServerless
+    ? Joi.string().min(16).optional().default('TEMPORARY_DEFAULT_SECRET_CHANGE_IN_PRODUCTION_VERCEL')
+    : Joi.string().min(16).required().error(new Error('JWT_ACCESS_SECRET is required')),
+  JWT_REFRESH_SECRET: isServerless
+    ? Joi.string().min(16).optional().default('TEMPORARY_DEFAULT_SECRET_CHANGE_IN_PRODUCTION_VERCEL')
+    : Joi.string().min(16).required().error(new Error('JWT_REFRESH_SECRET is required')),
   JWT_ACCESS_EXPIRES_IN: Joi.string().default("15m"),
   JWT_REFRESH_EXPIRES_IN: Joi.string().default("7d"),
   GOOGLE_CLIENT_ID: Joi.string().allow("").optional(),

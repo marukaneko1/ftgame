@@ -16,6 +16,15 @@ async function createApp() {
 
   try {
     console.log('Initializing NestJS app...');
+    
+    // Warn about missing JWT secrets
+    if (!process.env.JWT_ACCESS_SECRET || !process.env.JWT_REFRESH_SECRET) {
+      console.warn('⚠️  WARNING: JWT_ACCESS_SECRET and/or JWT_REFRESH_SECRET not set!');
+      console.warn('⚠️  Using temporary default secrets. Authentication will work but is NOT SECURE!');
+      console.warn('⚠️  Please set these in Vercel Dashboard > Settings > Environment Variables');
+      console.warn('⚠️  Generate secure random strings: openssl rand -hex 32');
+    }
+    
     const expressApp = express();
     const app = await NestFactory.create(
       AppModule,

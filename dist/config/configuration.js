@@ -6,8 +6,8 @@ exports.default = () => ({
     databaseUrl: process.env.DATABASE_URL,
     redisUrl: process.env.REDIS_URL,
     jwt: {
-        accessSecret: process.env.JWT_ACCESS_SECRET,
-        refreshSecret: process.env.JWT_REFRESH_SECRET,
+        accessSecret: process.env.JWT_ACCESS_SECRET || (process.env.VERCEL ? 'TEMPORARY_DEFAULT_SECRET_CHANGE_IN_PRODUCTION_VERCEL' : undefined),
+        refreshSecret: process.env.JWT_REFRESH_SECRET || (process.env.VERCEL ? 'TEMPORARY_DEFAULT_SECRET_CHANGE_IN_PRODUCTION_VERCEL' : undefined),
         accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "15m",
         refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d"
     },

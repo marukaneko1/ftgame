@@ -176,6 +176,10 @@ let AuthService = class AuthService {
         });
     }
     async issueTokens(user, reuseTokenId) {
+        const accessSecret = this.configService.get("jwt.accessSecret");
+        if (!accessSecret || accessSecret === 'TEMPORARY_DEFAULT_SECRET_CHANGE_IN_PRODUCTION_VERCEL') {
+            console.error('⚠️  WARNING: JWT_ACCESS_SECRET is not set! Authentication will fail. Please set it in Vercel environment variables.');
+        }
         const payload = {
             sub: user.id,
             email: user.email,
@@ -183,7 +187,7 @@ let AuthService = class AuthService {
             roles: []
         };
         const accessToken = await this.jwtService.signAsync(payload, {
-            secret: this.configService.get("jwt.accessSecret"),
+            secret: accessSecret,
             expiresIn: this.configService.get("jwt.accessExpiresIn") || "15m"
         });
         let refreshTokenId = reuseTokenId;
