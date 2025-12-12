@@ -22,26 +22,42 @@ const config_1 = require("@nestjs/config");
 let SubscriptionsService = SubscriptionsService_1 = class SubscriptionsService {
     prisma;
     configService;
-    stripe;
+    stripe = null;
     logger = new common_1.Logger(SubscriptionsService_1.name);
     constructor(prisma, configService) {
         this.prisma = prisma;
         this.configService = configService;
         const secretKey = this.configService.get("stripe.secretKey");
-        if (!secretKey)
-            throw new Error("STRIPE_SECRET_KEY missing");
-        this.stripe = new stripe_1.default(secretKey);
+        if (secretKey) {
+            try {
+                this.stripe = new stripe_1.default(secretKey);
+                this.logger.log('Stripe initialized successfully');
+            }
+            catch (error) {
+                this.logger.warn(`Failed to initialize Stripe: ${error?.message || 'Unknown error'}. Subscription features will not work.`);
+            }
+        }
+        else {
+            this.logger.warn('STRIPE_SECRET_KEY not configured. Subscription features will not work.');
+        }
+    }
+    ensureStripe() {
+        if (!this.stripe) {
+            throw new common_1.BadRequestException('Stripe is not configured. STRIPE_SECRET_KEY environment variable is required for subscription features.');
+        }
+        return this.stripe;
     }
     async getMySubscription(userId) {
         return this.prisma.subscription.findUnique({ where: { userId } });
     }
     async createBasicCheckoutSession(userId) {
+        const stripe = this.ensureStripe();
         const priceId = this.configService.get("stripe.basicPriceId");
         if (!priceId)
             throw new common_1.BadRequestException("Stripe basic price not configured");
         const successUrl = `${this.configService.get("urls.webBaseUrl")}/dashboard?checkout=success`;
         const cancelUrl = `${this.configService.get("urls.webBaseUrl")}/dashboard?checkout=cancel`;
-        const session = await this.stripe.checkout.sessions.create({
+        const session = await stripe.checkout.sessions.create({
             mode: "subscription",
             line_items: [{ price: priceId, quantity: 1 }],
             success_url: successUrl,
@@ -51,16 +67,17 @@ let SubscriptionsService = SubscriptionsService_1 = class SubscriptionsService {
         return { checkoutUrl: session.url };
     }
     async handleWebhook(rawBody, signature) {
+        const stripe = this.ensureStripe();
         const webhookSecret = this.configService.get("stripe.webhookSecret");
         if (!webhookSecret) {
-            throw new Error("STRIPE_WEBHOOK_SECRET missing");
+            throw new common_1.BadRequestException("STRIPE_WEBHOOK_SECRET missing");
         }
         if (!signature) {
             throw new common_1.BadRequestException("Missing Stripe signature");
         }
         let event;
         try {
-            event = this.stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+            event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
         }
         catch (err) {
             this.logger.error(`Stripe signature verification failed: ${err}`);
@@ -95,7 +112,8 @@ let SubscriptionsService = SubscriptionsService_1 = class SubscriptionsService {
         if (existing?.status === client_1.SubscriptionStatus.ACTIVE && existing.stripeSubscriptionId === stripeSubscriptionId) {
             return existing;
         }
-        const subscription = await this.stripe.subscriptions.retrieve(stripeSubscriptionId);
+        const stripe = this.ensureStripe();
+        const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
         const currentPeriodEnd = subscription.current_period_end
             ? new Date(subscription.current_period_end * 1000)
             : null;

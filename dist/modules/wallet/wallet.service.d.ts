@@ -5,8 +5,10 @@ export declare class WalletService {
     private readonly prisma;
     private readonly configService;
     private stripe;
+    private logger;
     private packTokens;
     constructor(prisma: PrismaService, configService: ConfigService);
+    private ensureStripe;
     ensureWallet(userId: string): Promise<{
         id: string;
         createdAt: Date;

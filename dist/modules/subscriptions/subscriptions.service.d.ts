@@ -6,6 +6,7 @@ export declare class SubscriptionsService {
     private stripe;
     private logger;
     constructor(prisma: PrismaService, configService: ConfigService);
+    private ensureStripe;
     getMySubscription(userId: string): Promise<{
         id: string;
         createdAt: Date;

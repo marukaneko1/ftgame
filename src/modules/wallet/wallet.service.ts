@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma, WalletTransactionType, WagerStatus } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import Stripe from "stripe";
@@ -6,7 +6,8 @@ import { ConfigService } from "@nestjs/config";
 
 @Injectable()
 export class WalletService {
-  private stripe: Stripe;
+  private stripe: Stripe | null = null;
+  private logger = new Logger(WalletService.name);
   private packTokens: Record<string, number> = {
     small: 500,
     medium: 1200,
@@ -15,8 +16,23 @@ export class WalletService {
 
   constructor(private readonly prisma: PrismaService, private readonly configService: ConfigService) {
     const secretKey = this.configService.get<string>("stripe.secretKey");
-    if (!secretKey) throw new Error("STRIPE_SECRET_KEY missing");
-    this.stripe = new Stripe(secretKey);
+    if (secretKey) {
+      try {
+        this.stripe = new Stripe(secretKey);
+        this.logger.log('Stripe initialized successfully');
+      } catch (error: any) {
+        this.logger.warn(`Failed to initialize Stripe: ${error?.message || 'Unknown error'}. Wallet payment features will not work.`);
+      }
+    } else {
+      this.logger.warn('STRIPE_SECRET_KEY not configured. Wallet payment features will not work.');
+    }
+  }
+
+  private ensureStripe(): Stripe {
+    if (!this.stripe) {
+      throw new BadRequestException('Stripe is not configured. STRIPE_SECRET_KEY environment variable is required for payment features.');
+    }
+    return this.stripe;
   }
 
   async ensureWallet(userId: string) {
@@ -186,6 +202,7 @@ export class WalletService {
   }
 
   async createTokenPackCheckout(userId: string, packId: string) {
+    const stripe = this.ensureStripe();
     const priceId = this.configService.get<string>("stripe.tokenPackPriceId");
     if (!priceId) throw new BadRequestException("Stripe token pack price not configured");
     const tokens = this.packTokens[packId];
@@ -193,7 +210,7 @@ export class WalletService {
     const successUrl = `${this.configService.get("urls.webBaseUrl")}/wallet?checkout=success`;
     const cancelUrl = `${this.configService.get("urls.webBaseUrl")}/wallet?checkout=cancel`;
 
-    const session = await this.stripe.checkout.sessions.create({
+    const session = await stripe.checkout.sessions.create({
       mode: "payment",
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
@@ -204,13 +221,14 @@ export class WalletService {
   }
 
   async handleStripeWebhook(rawBody: Buffer, signature: string | undefined) {
+    const stripe = this.ensureStripe();
     const webhookSecret = this.configService.get<string>("stripe.webhookSecret");
-    if (!webhookSecret) throw new Error("STRIPE_WEBHOOK_SECRET missing");
+    if (!webhookSecret) throw new BadRequestException("STRIPE_WEBHOOK_SECRET missing");
     if (!signature) throw new BadRequestException("Missing Stripe signature");
 
     let event: Stripe.Event;
     try {
-      event = this.stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+      event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
     } catch (err) {
       throw new BadRequestException("Invalid Stripe signature");
     }

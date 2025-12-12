@@ -6,13 +6,28 @@ import { ConfigService } from "@nestjs/config";
 
 @Injectable()
 export class SubscriptionsService {
-  private stripe: Stripe;
+  private stripe: Stripe | null = null;
   private logger = new Logger(SubscriptionsService.name);
 
   constructor(private readonly prisma: PrismaService, private readonly configService: ConfigService) {
     const secretKey = this.configService.get<string>("stripe.secretKey");
-    if (!secretKey) throw new Error("STRIPE_SECRET_KEY missing");
-    this.stripe = new Stripe(secretKey);
+    if (secretKey) {
+      try {
+        this.stripe = new Stripe(secretKey);
+        this.logger.log('Stripe initialized successfully');
+      } catch (error: any) {
+        this.logger.warn(`Failed to initialize Stripe: ${error?.message || 'Unknown error'}. Subscription features will not work.`);
+      }
+    } else {
+      this.logger.warn('STRIPE_SECRET_KEY not configured. Subscription features will not work.');
+    }
+  }
+
+  private ensureStripe(): Stripe {
+    if (!this.stripe) {
+      throw new BadRequestException('Stripe is not configured. STRIPE_SECRET_KEY environment variable is required for subscription features.');
+    }
+    return this.stripe;
   }
 
   async getMySubscription(userId: string) {
@@ -20,12 +35,13 @@ export class SubscriptionsService {
   }
 
   async createBasicCheckoutSession(userId: string) {
+    const stripe = this.ensureStripe();
     const priceId = this.configService.get<string>("stripe.basicPriceId");
     if (!priceId) throw new BadRequestException("Stripe basic price not configured");
     const successUrl = `${this.configService.get("urls.webBaseUrl")}/dashboard?checkout=success`;
     const cancelUrl = `${this.configService.get("urls.webBaseUrl")}/dashboard?checkout=cancel`;
 
-    const session = await this.stripe.checkout.sessions.create({
+    const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
@@ -36,9 +52,10 @@ export class SubscriptionsService {
   }
 
   async handleWebhook(rawBody: Buffer, signature: string | undefined) {
+    const stripe = this.ensureStripe();
     const webhookSecret = this.configService.get<string>("stripe.webhookSecret");
     if (!webhookSecret) {
-      throw new Error("STRIPE_WEBHOOK_SECRET missing");
+      throw new BadRequestException("STRIPE_WEBHOOK_SECRET missing");
     }
     if (!signature) {
       throw new BadRequestException("Missing Stripe signature");
@@ -46,7 +63,7 @@ export class SubscriptionsService {
 
     let event: Stripe.Event;
     try {
-      event = this.stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+      event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
     } catch (err) {
       this.logger.error(`Stripe signature verification failed: ${err}`);
       throw new BadRequestException("Invalid Stripe signature");
@@ -86,7 +103,8 @@ export class SubscriptionsService {
     }
 
     // Fetch subscription for period end
-    const subscription = await this.stripe.subscriptions.retrieve(stripeSubscriptionId);
+    const stripe = this.ensureStripe();
+    const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
     const currentPeriodEnd = subscription.current_period_end
       ? new Date(subscription.current_period_end * 1000)
       : null;

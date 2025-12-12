@@ -11,6 +11,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
+var WalletService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WalletService = void 0;
 const common_1 = require("@nestjs/common");
@@ -18,10 +19,11 @@ const client_1 = require("@prisma/client");
 const prisma_service_1 = require("../../prisma/prisma.service");
 const stripe_1 = __importDefault(require("stripe"));
 const config_1 = require("@nestjs/config");
-let WalletService = class WalletService {
+let WalletService = WalletService_1 = class WalletService {
     prisma;
     configService;
-    stripe;
+    stripe = null;
+    logger = new common_1.Logger(WalletService_1.name);
     packTokens = {
         small: 500,
         medium: 1200,
@@ -31,9 +33,24 @@ let WalletService = class WalletService {
         this.prisma = prisma;
         this.configService = configService;
         const secretKey = this.configService.get("stripe.secretKey");
-        if (!secretKey)
-            throw new Error("STRIPE_SECRET_KEY missing");
-        this.stripe = new stripe_1.default(secretKey);
+        if (secretKey) {
+            try {
+                this.stripe = new stripe_1.default(secretKey);
+                this.logger.log('Stripe initialized successfully');
+            }
+            catch (error) {
+                this.logger.warn(`Failed to initialize Stripe: ${error?.message || 'Unknown error'}. Wallet payment features will not work.`);
+            }
+        }
+        else {
+            this.logger.warn('STRIPE_SECRET_KEY not configured. Wallet payment features will not work.');
+        }
+    }
+    ensureStripe() {
+        if (!this.stripe) {
+            throw new common_1.BadRequestException('Stripe is not configured. STRIPE_SECRET_KEY environment variable is required for payment features.');
+        }
+        return this.stripe;
     }
     async ensureWallet(userId) {
         return this.prisma.wallet.upsert({
@@ -189,6 +206,7 @@ let WalletService = class WalletService {
         return { payoutTokens: payout };
     }
     async createTokenPackCheckout(userId, packId) {
+        const stripe = this.ensureStripe();
         const priceId = this.configService.get("stripe.tokenPackPriceId");
         if (!priceId)
             throw new common_1.BadRequestException("Stripe token pack price not configured");
@@ -197,7 +215,7 @@ let WalletService = class WalletService {
             throw new common_1.BadRequestException("Invalid packId");
         const successUrl = `${this.configService.get("urls.webBaseUrl")}/wallet?checkout=success`;
         const cancelUrl = `${this.configService.get("urls.webBaseUrl")}/wallet?checkout=cancel`;
-        const session = await this.stripe.checkout.sessions.create({
+        const session = await stripe.checkout.sessions.create({
             mode: "payment",
             line_items: [{ price: priceId, quantity: 1 }],
             success_url: successUrl,
@@ -207,14 +225,15 @@ let WalletService = class WalletService {
         return { checkoutUrl: session.url };
     }
     async handleStripeWebhook(rawBody, signature) {
+        const stripe = this.ensureStripe();
         const webhookSecret = this.configService.get("stripe.webhookSecret");
         if (!webhookSecret)
-            throw new Error("STRIPE_WEBHOOK_SECRET missing");
+            throw new common_1.BadRequestException("STRIPE_WEBHOOK_SECRET missing");
         if (!signature)
             throw new common_1.BadRequestException("Missing Stripe signature");
         let event;
         try {
-            event = this.stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+            event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
         }
         catch (err) {
             throw new common_1.BadRequestException("Invalid Stripe signature");
@@ -239,7 +258,7 @@ let WalletService = class WalletService {
     }
 };
 exports.WalletService = WalletService;
-exports.WalletService = WalletService = __decorate([
+exports.WalletService = WalletService = WalletService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService, config_1.ConfigService])
 ], WalletService);
