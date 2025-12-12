@@ -26,7 +26,21 @@ export class MatchmakingService implements OnModuleDestroy {
     const redisUrl = configService.get<string>("redisUrl");
     if (redisUrl) {
       try {
-        this.redis = new Redis(redisUrl);
+        // Upstash requires TLS - configure ioredis to use TLS for secure connections
+        const isUpstash = redisUrl.includes('upstash.io');
+        const redisOptions: any = redisUrl;
+        
+        if (isUpstash) {
+          // For Upstash, we need to parse the URL and add TLS config
+          // The URL format is: redis://default:PASSWORD@HOST:PORT
+          this.redis = new Redis(redisUrl, {
+            tls: {
+              rejectUnauthorized: false // Upstash uses self-signed certificates
+            }
+          });
+        } else {
+          this.redis = new Redis(redisUrl);
+        }
         this.logger.log('Redis connected successfully');
         
         // Start periodic cleanup of stale userQueues entries

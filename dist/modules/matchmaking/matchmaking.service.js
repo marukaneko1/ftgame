@@ -30,7 +30,18 @@ let MatchmakingService = MatchmakingService_1 = class MatchmakingService {
         const redisUrl = configService.get("redisUrl");
         if (redisUrl) {
             try {
-                this.redis = new ioredis_1.default(redisUrl);
+                const isUpstash = redisUrl.includes('upstash.io');
+                const redisOptions = redisUrl;
+                if (isUpstash) {
+                    this.redis = new ioredis_1.default(redisUrl, {
+                        tls: {
+                            rejectUnauthorized: false
+                        }
+                    });
+                }
+                else {
+                    this.redis = new ioredis_1.default(redisUrl);
+                }
                 this.logger.log('Redis connected successfully');
                 this.cleanupInterval = setInterval(() => {
                     this.cleanupStaleEntries();
