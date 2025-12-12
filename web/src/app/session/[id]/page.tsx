@@ -1,0 +1,1357 @@
+"use client";
+
+import { useEffect, useState, useRef, useCallback } from "react";
+import { useRouter, useParams } from "next/navigation";
+import { io, Socket } from "socket.io-client";
+import AgoraRTC, { ICameraVideoTrack, IMicrophoneAudioTrack, IAgoraRTCClient, IAgoraRTCRemoteUser, NetworkQuality } from "agora-rtc-sdk-ng";
+import { videoApi, usersApi, walletApi } from "@/lib/api";
+import TicTacToeGame from "@/components/games/TicTacToeGame";
+import ChessGame from "@/components/games/ChessGame";
+import TriviaGame from "@/components/games/TriviaGame";
+
+// Configurable WebSocket URL
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://localhost:3001";
+
+interface SessionData {
+  sessionId: string;
+  peer: { id: string };
+  video: { channelName: string; token: string; expiresAt?: string };
+}
+
+interface RemoteUserInfo {
+  uid: string | number;
+  hasVideo: boolean;
+  hasAudio: boolean;
+}
+
+interface NetworkQualityState {
+  uplink: number; // 0-6: unknown, excellent, good, poor, bad, very bad, down
+  downlink: number;
+}
+
+export default function SessionPage() {
+  const params = useParams();
+  const router = useRouter();
+  const sessionId = params.id as string;
+  const [sessionData, setSessionData] = useState<SessionData | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [gameType, setGameType] = useState<string | null>(null);
+  const [gameId, setGameId] = useState<string | null>(null);
+  const [gameState, setGameState] = useState<any>(null);
+  const [gamePlayers, setGamePlayers] = useState<any[]>([]);
+  const [videoReady, setVideoReady] = useState(false);
+  const [error, setError] = useState<string>("");
+  const [localVideoActive, setLocalVideoActive] = useState(false);
+  const [remoteVideoActive, setRemoteVideoActive] = useState(false);
+  const [videosSwapped, setVideosSwapped] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  // New state for audio/video controls
+  const [isMuted, setIsMuted] = useState(false);
+  const [isCameraOff, setIsCameraOff] = useState(false);
+  
+  // New state for remote user info (fixes ref not triggering re-render)
+  const [remoteUserInfo, setRemoteUserInfo] = useState<RemoteUserInfo | null>(null);
+  
+  // New state for network quality
+  const [networkQuality, setNetworkQuality] = useState<NetworkQualityState>({ uplink: 0, downlink: 0 });
+  
+  // New state for session duration
+  const [sessionDuration, setSessionDuration] = useState(0);
+  const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
+  
+  // New state for connection status
+  const [connectionState, setConnectionState] = useState<string>("DISCONNECTED");
+  
+  // Wallet balance state
+  const [walletBalance, setWalletBalance] = useState<number>(0);
+  
+  // Gift notification state
+  const [giftNotification, setGiftNotification] = useState<{ from: string; amount: number; isReceived: boolean } | null>(null);
+  const giftNotificationTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  const mainVideoRef = useRef<HTMLDivElement>(null);
+  const overlayVideoRef = useRef<HTMLDivElement>(null);
+  const videoContainerRef = useRef<HTMLDivElement>(null);
+  const clientRef = useRef<IAgoraRTCClient | null>(null);
+  const localTrackRef = useRef<{ videoTrack: ICameraVideoTrack | null; audioTrack: IMicrophoneAudioTrack | null } | null>(null);
+  const remoteTrackRef = useRef<IAgoraRTCRemoteUser | null>(null);
+  const remoteUserRef = useRef<IAgoraRTCRemoteUser | null>(null);
+  const videoCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const sessionTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const tokenRenewalTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Use refs to track latest state values (fixes stale closure issue)
+  const remoteVideoActiveRef = useRef(false);
+  const localVideoActiveRef = useRef(false);
+  
+  const [userId, setUserId] = useState<string>("");
+
+  // Keep refs in sync with state (fixes stale closure issue in intervals)
+  useEffect(() => {
+    remoteVideoActiveRef.current = remoteVideoActive;
+  }, [remoteVideoActive]);
+  
+  useEffect(() => {
+    localVideoActiveRef.current = localVideoActive;
+  }, [localVideoActive]);
+
+  // Audio mute/unmute toggle
+  const toggleMute = useCallback(() => {
+    if (localTrackRef.current?.audioTrack) {
+      const newMuted = !isMuted;
+      localTrackRef.current.audioTrack.setEnabled(!newMuted);
+      setIsMuted(newMuted);
+      console.log(newMuted ? "🔇 Audio muted" : "🔊 Audio unmuted");
+    }
+  }, [isMuted]);
+
+  // Camera on/off toggle
+  const toggleCamera = useCallback(() => {
+    if (localTrackRef.current?.videoTrack) {
+      const newCameraOff = !isCameraOff;
+      localTrackRef.current.videoTrack.setEnabled(!newCameraOff);
+      setIsCameraOff(newCameraOff);
+      console.log(newCameraOff ? "📷 Camera off" : "📹 Camera on");
+    }
+  }, [isCameraOff]);
+
+  // Session duration timer
+  useEffect(() => {
+    if (sessionStartTime) {
+      sessionTimerRef.current = setInterval(() => {
+        setSessionDuration(Math.floor((Date.now() - sessionStartTime) / 1000));
+      }, 1000);
+      
+      return () => {
+        if (sessionTimerRef.current) {
+          clearInterval(sessionTimerRef.current);
+        }
+      };
+    }
+  }, [sessionStartTime]);
+
+  // Format duration as mm:ss
+  const formatDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Network quality label
+  const getNetworkQualityLabel = (quality: number): { label: string; color: string } => {
+    switch (quality) {
+      case 1: return { label: "Excellent", color: "text-green-400" };
+      case 2: return { label: "Good", color: "text-green-300" };
+      case 3: return { label: "Poor", color: "text-yellow-400" };
+      case 4: return { label: "Bad", color: "text-orange-400" };
+      case 5: return { label: "Very Bad", color: "text-red-400" };
+      case 6: return { label: "Down", color: "text-red-600" };
+      default: return { label: "Unknown", color: "text-gray-400" };
+    }
+  };
+
+  // Get user ID and wallet balance on mount
+  useEffect(() => {
+    const loadUserData = async () => {
+      try {
+        const [user, wallet] = await Promise.all([
+          usersApi.getMe(),
+          walletApi.getMyWallet()
+        ]);
+        setUserId(user.id);
+        setWalletBalance(wallet?.balanceTokens || 0);
+      } catch (err) {
+        console.error("Failed to load user data:", err);
+      }
+    };
+    loadUserData();
+  }, []);
+  
+  // Show gift notification with auto-dismiss
+  const showGiftNotification = useCallback((from: string, amount: number, isReceived: boolean) => {
+    // Clear any existing timer
+    if (giftNotificationTimerRef.current) {
+      clearTimeout(giftNotificationTimerRef.current);
+    }
+    
+    setGiftNotification({ from, amount, isReceived });
+    
+    // Auto-dismiss after 5 seconds
+    giftNotificationTimerRef.current = setTimeout(() => {
+      setGiftNotification(null);
+    }, 5000);
+  }, []);
+
+  // Track the channel we're connected to to prevent reinitializing for the same session
+  const connectedChannelRef = useRef<string | null>(null);
+
+  // Initialize Agora video when session data is ready
+  useEffect(() => {
+    if (!sessionData?.video || !userId) {
+      // Only log once when missing data, not on every render
+      if (!sessionData?.video && !userId) {
+        // Silently wait - will initialize once both are available
+      }
+      return;
+    }
+
+    // Prevent multiple initializations for the same channel
+    // This handles WebSocket reconnections that resend session.ready
+    if (clientRef.current && connectedChannelRef.current === sessionData.video.channelName) {
+      console.log("Video already initialized for this channel, skipping");
+      return;
+    }
+    
+    // If we're connected to a different channel, clean up first
+    if (clientRef.current && connectedChannelRef.current !== sessionData.video.channelName) {
+      console.log("Channel changed, cleaning up old connection");
+      // This will be handled by the cleanup function
+    }
+
+    let isMounted = true;
+    let retryCount = 0;
+    const MAX_RETRIES = 50; // Max 5 seconds of retries (50 * 100ms)
+    let retryTimer: NodeJS.Timeout | null = null;
+
+    // Wait for refs to be available (they might not be immediately after render)
+    const checkAndInit = () => {
+      if (!isMounted) {
+        if (retryTimer) clearTimeout(retryTimer);
+        return;
+      }
+
+      if (!mainVideoRef.current || !overlayVideoRef.current) {
+        retryCount++;
+        if (retryCount >= MAX_RETRIES) {
+          console.error("Video refs never became available after", MAX_RETRIES, "retries");
+          setError("Video containers failed to initialize. Please refresh the page.");
+          retryTimer = null;
+          return;
+        }
+        if (retryCount % 10 === 0) {
+          console.log(`Waiting for video refs... (attempt ${retryCount}/${MAX_RETRIES})`);
+        }
+        retryTimer = setTimeout(checkAndInit, 100);
+        return;
+      }
+
+      console.log("All conditions met, initializing video");
+      retryTimer = null; // Clear timer since we're proceeding
+      initVideo();
+    };
+
+    const initVideo = async () => {
+      let appId: string = "";
+
+      try {
+        console.log("Starting video initialization...");
+        setError("");
+        
+        // Get Agora App ID
+        const appIdResponse = await videoApi.getAppId();
+        appId = appIdResponse.appId;
+        if (!appId) {
+          console.error("Agora App ID not found");
+          setError("Agora App ID not configured");
+          return;
+        }
+
+        console.log("Agora App ID:", appId);
+
+        // Create Agora client
+        const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+        clientRef.current = client;
+
+        console.log("Joining channel:", sessionData.video.channelName);
+        console.log("Using userId (account):", userId);
+        console.log("App ID:", appId);
+        console.log("Token preview:", sessionData.video.token.substring(0, 50) + "...");
+        
+        // Join channel - when using buildTokenWithAccount, pass the account string as uid
+        // The token contains the account info, so we pass the same userId
+        await client.join(appId, sessionData.video.channelName, sessionData.video.token, userId);
+        connectedChannelRef.current = sessionData.video.channelName;
+        console.log("Successfully joined Agora channel");
+
+        // Check for existing remote users immediately after joining
+        const remoteUsers = client.remoteUsers;
+        console.log("👥 Existing remote users in channel:", remoteUsers.length);
+        if (remoteUsers.length > 0) {
+          for (const remoteUser of remoteUsers) {
+            console.log("👤 Found existing remote user:", remoteUser.uid);
+            // Subscribe to existing remote user's tracks
+            try {
+              // Subscribe to both video and audio
+              await client.subscribe(remoteUser, "video");
+              await client.subscribe(remoteUser, "audio");
+              console.log("✅ Subscribed to existing remote user tracks");
+              remoteUserRef.current = remoteUser;
+              // Update state for UI (refs don't trigger re-renders)
+              setRemoteUserInfo({
+                uid: remoteUser.uid,
+                hasVideo: !!remoteUser.videoTrack,
+                hasAudio: !!remoteUser.audioTrack
+              });
+              
+              // Play audio immediately
+              if (remoteUser.audioTrack) {
+                remoteUser.audioTrack.play();
+                console.log("🔊 Playing existing remote user's audio");
+              }
+              
+              // Multiple retries for video track to ensure it's ready
+              const tryPlayRemoteVideo = (attempt = 0) => {
+                if (!isMounted) {
+                  console.log("⚠️ Component unmounted, stopping remote video retry");
+                  return;
+                }
+                
+                console.log(`🔄 Attempt ${attempt} to play existing remote video. Track:`, !!remoteUser.videoTrack, "Container:", !!mainVideoRef.current);
+                
+                if (remoteUser.videoTrack && mainVideoRef.current) {
+                  try {
+                    // Stop any existing playback
+                    try {
+                      remoteUser.videoTrack.stop();
+                    } catch (e) {
+                      // Ignore
+                    }
+                    
+                    // @ts-ignore
+                    remoteUser.videoTrack.play(mainVideoRef.current);
+                    
+                    // Verify video element was created
+                    setTimeout(() => {
+                      const videoElement = mainVideoRef.current?.querySelector('video');
+                      if (videoElement) {
+                        console.log("✅ Existing remote video element created. Dimensions:", videoElement.videoWidth, "x", videoElement.videoHeight);
+                        setRemoteVideoActive(true);
+                      } else {
+                        console.error("❌ Video element not found after play()");
+                        if (attempt < 5) {
+                          setTimeout(() => tryPlayRemoteVideo(attempt + 1), 500);
+                        }
+                      }
+                    }, 200);
+                    
+                    console.log("✅ Playing existing remote user's video in main container");
+                    setRemoteVideoActive(true);
+                  } catch (playError: any) {
+                    console.error(`❌ Error playing existing remote video (attempt ${attempt}):`, playError?.message || playError);
+                    if (attempt < 10) {
+                      setTimeout(() => tryPlayRemoteVideo(attempt + 1), 300 * (attempt + 1));
+                    }
+                  }
+                } else if (attempt < 15) {
+                  console.log(`⏳ Video track or container not ready (track: ${!!remoteUser.videoTrack}, container: ${!!mainVideoRef.current})`);
+                  setTimeout(() => tryPlayRemoteVideo(attempt + 1), 150 * (attempt + 1));
+                } else {
+                  console.error("❌ Remote video track never became available");
+                }
+              };
+              
+              // Start trying to play video immediately and with retries
+              setTimeout(() => tryPlayRemoteVideo(), 100);
+              
+            } catch (subError: any) {
+              console.error("❌ Error subscribing to existing remote user:", subError?.message || subError);
+            }
+          }
+        } else {
+          console.log("⏳ No existing remote users, waiting for user-published event");
+        }
+
+        // Create and publish local video/audio tracks
+        console.log("Requesting camera and microphone access...");
+        
+        try {
+          const [micTrack, camTrack] = await AgoraRTC.createMicrophoneAndCameraTracks(
+            {},
+            {
+              encoderConfig: {
+                width: { min: 640, ideal: 1280, max: 1920 },
+                height: { min: 480, ideal: 720, max: 1080 },
+                frameRate: { min: 15, ideal: 30, max: 30 }
+              }
+            }
+          );
+          
+          // Note: createMicrophoneAndCameraTracks returns [IMicrophoneAudioTrack, ICameraVideoTrack]
+          const audioTrack = micTrack;
+          const videoTrack = camTrack;
+          
+          localTrackRef.current = { videoTrack, audioTrack };
+          console.log("Tracks created successfully");
+          
+          await client.publish([micTrack, camTrack]);
+          console.log("Tracks published to channel");
+
+          // Display local video in overlay container (small corner by default)
+          // Retry multiple times to ensure the ref is ready
+          const tryPlayLocalVideo = (attempt = 0) => {
+            if (!isMounted || !videoTrack) return;
+            
+            if (overlayVideoRef.current) {
+              try {
+                // @ts-ignore - Agora SDK play() accepts HTMLElement but types may be outdated
+                videoTrack.play(overlayVideoRef.current);
+                console.log("Local video playing in overlay container");
+                setLocalVideoActive(true);
+              } catch (playError) {
+                console.error(`Error playing local video (attempt ${attempt}):`, playError);
+                if (attempt < 5) {
+                  setTimeout(() => tryPlayLocalVideo(attempt + 1), 100 * (attempt + 1));
+                }
+              }
+            } else if (attempt < 10) {
+              // Ref not ready yet, retry
+              setTimeout(() => tryPlayLocalVideo(attempt + 1), 50 * (attempt + 1));
+            } else {
+              console.error("Local video ref never became available");
+            }
+          };
+          
+          tryPlayLocalVideo();
+        } catch (trackError: any) {
+          console.error("Failed to create/publish local tracks:", trackError);
+          if (trackError.message?.includes("permission") || trackError.name === "NotAllowedError") {
+            setError("Camera or microphone permission denied. Please allow access in your browser settings and refresh the page.");
+          } else if (trackError.name === "NotFoundError" || trackError.name === "NotReadableError") {
+            setError("Camera or microphone not found or already in use. Please check your devices.");
+          } else {
+            setError(`Failed to access camera/microphone: ${trackError.message || trackError.name}`);
+          }
+          // Continue even if local video fails - user can still see remote video
+          localTrackRef.current = { videoTrack: null, audioTrack: null };
+        }
+
+        // Handle remote user joining after we've joined
+        client.on("user-published", async (user, mediaType) => {
+          console.log("🔔 Remote user published:", mediaType, "User ID:", user.uid);
+          try {
+            await client.subscribe(user, mediaType);
+            console.log("✅ Subscribed to", mediaType, "for user", user.uid);
+            remoteUserRef.current = user;
+            // Update state for UI (refs don't trigger re-renders)
+            setRemoteUserInfo(prev => ({
+              uid: user.uid,
+              hasVideo: mediaType === "video" ? true : (prev?.hasVideo || false),
+              hasAudio: mediaType === "audio" ? true : (prev?.hasAudio || false)
+            }));
+            
+            // Play audio immediately if available
+            if (mediaType === "audio" && user.audioTrack) {
+              user.audioTrack.play();
+              console.log("🔊 Remote audio playing for user:", user.uid);
+            }
+            
+            // For video, try multiple times with exponential backoff
+            if (mediaType === "video") {
+              console.log("📹 Video track available:", !!user.videoTrack, "Main container:", !!mainVideoRef.current);
+              
+              const tryPlayVideo = (attempt = 0) => {
+                if (!isMounted) {
+                  console.log("⚠️ Component unmounted, stopping video retry");
+                  return;
+                }
+                
+                console.log(`🔄 Attempt ${attempt} to play remote video. Track:`, !!user.videoTrack, "Container:", !!mainVideoRef.current);
+                
+                if (user.videoTrack && mainVideoRef.current) {
+                  try {
+                    // Stop any existing video first
+                    try {
+                      user.videoTrack.stop();
+                    } catch (e) {
+                      // Ignore if not playing
+                    }
+                    
+                    // @ts-ignore
+                    user.videoTrack.play(mainVideoRef.current);
+                    
+                    // Verify video element was created
+                    setTimeout(() => {
+                      const videoElement = mainVideoRef.current?.querySelector('video');
+                      if (videoElement) {
+                        console.log("✅ Remote video element created successfully. Video dimensions:", videoElement.videoWidth, "x", videoElement.videoHeight);
+                        console.log("Video element:", videoElement);
+                        setRemoteVideoActive(true);
+                      } else {
+                        console.error("❌ Video element not found in container after play()");
+                        if (attempt < 5) {
+                          setTimeout(() => tryPlayVideo(attempt + 1), 500);
+                        }
+                      }
+                    }, 200);
+                    
+                    console.log("✅ Remote video playing for user:", user.uid, "in main container (attempt", attempt + ")");
+                    setRemoteVideoActive(true);
+                  } catch (playError: any) {
+                    console.error(`❌ Error playing remote video (attempt ${attempt}):`, playError?.message || playError);
+                    if (attempt < 10) {
+                      setTimeout(() => tryPlayVideo(attempt + 1), 300 * (attempt + 1));
+                    } else {
+                      console.error("❌ Failed to play remote video after", attempt, "attempts");
+                    }
+                  }
+                } else {
+                  console.log(`⏳ Video track or container not ready (track: ${!!user.videoTrack}, container: ${!!mainVideoRef.current})`);
+                  if (attempt < 15) {
+                    setTimeout(() => tryPlayVideo(attempt + 1), 150 * (attempt + 1));
+                  } else {
+                    console.error("❌ Remote video track or container never became available after", attempt, "attempts");
+                  }
+                }
+              };
+              
+              // Start trying immediately and with retries
+              setTimeout(() => tryPlayVideo(), 100);
+            }
+          } catch (subError: any) {
+            console.error("❌ Error subscribing to remote user:", subError?.message || subError);
+          }
+        });
+
+        client.on("user-unpublished", (user) => {
+          console.log("Remote user unpublished:", user.uid);
+          setRemoteVideoActive(false);
+          if (user.videoTrack) {
+            user.videoTrack.stop();
+          }
+          if (user.audioTrack) {
+            user.audioTrack.stop();
+          }
+        });
+        
+        // Also listen for track-ended events
+        client.on("user-left", (user) => {
+          console.log("Remote user left:", user.uid);
+          setRemoteVideoActive(false);
+        });
+
+        // Periodic check to ensure videos are playing (fallback for edge cases)
+        videoCheckIntervalRef.current = setInterval(() => {
+          if (!isMounted) {
+            if (videoCheckIntervalRef.current) {
+              clearInterval(videoCheckIntervalRef.current);
+              videoCheckIntervalRef.current = null;
+            }
+            return;
+          }
+          
+          // Check local video - try to attach if track exists and container is available
+          if (localTrackRef.current?.videoTrack && overlayVideoRef.current) {
+            // Check if video is actually playing by checking the element
+            const hasVideoElement = overlayVideoRef.current.querySelector('video');
+            if (!hasVideoElement || hasVideoElement.paused) {
+              try {
+                // @ts-ignore
+                localTrackRef.current.videoTrack.play(overlayVideoRef.current);
+                console.log("Re-attached local video (periodic check)");
+                setLocalVideoActive(true);
+              } catch (e) {
+                // Video might already be attached
+              }
+            }
+          }
+          
+          // Check remote video - try to attach if track exists and container is available
+          if (remoteUserRef.current?.videoTrack && mainVideoRef.current) {
+            // Check if video is actually playing by checking the element
+            const videoElement = mainVideoRef.current.querySelector('video') as HTMLVideoElement;
+            if (!videoElement || videoElement.paused || videoElement.readyState === 0) {
+              try {
+                // Stop first to ensure clean state
+                try {
+                  remoteUserRef.current.videoTrack.stop();
+                } catch (e) {
+                  // Ignore
+                }
+                
+                // @ts-ignore
+                remoteUserRef.current.videoTrack.play(mainVideoRef.current);
+                console.log("🔄 Re-attached remote video (periodic check)");
+                
+                // Verify it worked
+                setTimeout(() => {
+                  const newVideoElement = mainVideoRef.current?.querySelector('video') as HTMLVideoElement;
+                  if (newVideoElement && !newVideoElement.paused) {
+                    setRemoteVideoActive(true);
+                    console.log("✅ Remote video verified playing");
+                  }
+                }, 300);
+              } catch (e: any) {
+                console.error("❌ Error re-attaching remote video:", e?.message);
+              }
+            } else {
+              // Video is playing, ensure state is correct (use ref to avoid stale closure)
+              if (!remoteVideoActiveRef.current) {
+                setRemoteVideoActive(true);
+              }
+            }
+          } else {
+            // Log why we're not trying to attach (only once every few checks)
+            // Silence periodic logs to reduce noise
+          }
+        }, 2000); // Check every 2 seconds
+        
+        // Network quality monitoring
+        client.on("network-quality", (stats) => {
+          setNetworkQuality({
+            uplink: stats.uplinkNetworkQuality,
+            downlink: stats.downlinkNetworkQuality
+          });
+        });
+        
+        // Connection state tracking
+        client.on("connection-state-change", (curState, prevState) => {
+          console.log(`📡 Connection state: ${prevState} -> ${curState}`);
+          setConnectionState(curState);
+          
+          if (curState === "CONNECTED") {
+            // Start session timer when connected
+            if (!sessionStartTime) {
+              setSessionStartTime(Date.now());
+            }
+          }
+          
+          if (curState === "DISCONNECTED" || curState === "DISCONNECTING" || (curState as string) === "FAILED") {
+            if (videoCheckIntervalRef.current) {
+              clearInterval(videoCheckIntervalRef.current);
+              videoCheckIntervalRef.current = null;
+            }
+            
+            // Attempt reconnection if disconnected unexpectedly
+            if (curState === "DISCONNECTED" && prevState === "CONNECTED") {
+              console.log("🔄 Connection lost, attempting to reconnect...");
+              setError("Connection lost. Attempting to reconnect...");
+              // Agora SDK will attempt to reconnect automatically
+            }
+          }
+        });
+        
+        // Token renewal setup (5 minutes before expiry)
+        if (sessionData.video.expiresAt) {
+          const expiresAt = new Date(sessionData.video.expiresAt).getTime();
+          const now = Date.now();
+          const renewIn = expiresAt - now - (5 * 60 * 1000); // 5 min before expiry
+          
+          if (renewIn > 0) {
+            console.log(`⏰ Token renewal scheduled in ${Math.floor(renewIn / 1000 / 60)} minutes`);
+            tokenRenewalTimerRef.current = setTimeout(async () => {
+              try {
+                console.log("🔄 Renewing Agora token...");
+                const response = await videoApi.getToken(sessionId);
+                if (response.token && clientRef.current) {
+                  await clientRef.current.renewToken(response.token);
+                  console.log("✅ Token renewed successfully");
+                  setError("");
+                }
+              } catch (renewError: any) {
+                console.error("❌ Failed to renew token:", renewError);
+                setError("Video session may expire soon. Please refresh if issues occur.");
+              }
+            }, renewIn);
+          }
+        }
+
+        if (isMounted) {
+          setVideoReady(true);
+          console.log("Video initialization complete!");
+        }
+      } catch (error: any) {
+        console.error("❌ Failed to initialize video:", error);
+        let errorMsg = error.message || error.toString() || "Failed to start video call";
+        
+        // Provide more helpful error messages
+        if (errorMsg.includes("invalid vendor key") || errorMsg.includes("can not find appid")) {
+          errorMsg = "Invalid Agora App ID or Certificate. Please verify your Agora credentials match in the Agora console. Check AGORA_APP_ID and AGORA_APP_CERTIFICATE in api/.env";
+        } else if (errorMsg.includes("permission") || errorMsg.includes("Permission")) {
+          errorMsg = "Camera or microphone permission denied. Please allow access in your browser settings.";
+        } else if (errorMsg.includes("NotFoundError") || errorMsg.includes("NotReadableError")) {
+          errorMsg = "Camera or microphone not found or already in use.";
+        }
+        
+        setError(`Video error: ${errorMsg}`);
+        console.error("Full error details:", error);
+        if (appId) {
+          console.error("App ID used:", appId);
+        }
+        if (sessionData?.video?.channelName) {
+          console.error("Channel:", sessionData.video.channelName);
+        }
+        alert(`Failed to start video call: ${errorMsg}\n\nPlease check:\n1. Agora credentials are correct and match your Agora console\n2. Camera and microphone permissions\n3. Browser console for details`);
+      }
+    };
+
+    // Start the initialization check after a short delay to ensure refs are attached
+    const timer = setTimeout(() => {
+      checkAndInit();
+    }, 300);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+
+      // Cleanup on unmount
+      if (localTrackRef.current) {
+        localTrackRef.current.videoTrack?.stop();
+        localTrackRef.current.videoTrack?.close();
+        localTrackRef.current.audioTrack?.stop();
+        localTrackRef.current.audioTrack?.close();
+        localTrackRef.current = null;
+      }
+      if (clientRef.current) {
+        clientRef.current.leave();
+        clientRef.current = null;
+      }
+      connectedChannelRef.current = null;
+      if (videoCheckIntervalRef.current) {
+        clearInterval(videoCheckIntervalRef.current);
+        videoCheckIntervalRef.current = null;
+      }
+      if (tokenRenewalTimerRef.current) {
+        clearTimeout(tokenRenewalTimerRef.current);
+        tokenRenewalTimerRef.current = null;
+      }
+    };
+  }, [sessionData, userId, sessionId]);
+
+  useEffect(() => {
+    const token = localStorage.getItem("accessToken");
+    if (!token) {
+      router.push("/auth/login");
+      return;
+    }
+
+    // Connect to WebSocket (using configurable URL)
+    const ws = io(`${WS_URL}/ws`, {
+      auth: { token },
+      transports: ["websocket"]
+    });
+
+    // Track if we've already joined the session
+    let hasJoinedSession = false;
+    
+    ws.on("connect", () => {
+      console.log("WebSocket connected");
+      setConnected(true);
+      setError("");
+      // Only join session if we haven't already (prevents rejoining on reconnect)
+      if (!hasJoinedSession) {
+        console.log("Joining session:", sessionId);
+        // Wait a bit for connection to stabilize
+        setTimeout(() => {
+          ws.emit("session.join", { sessionId });
+          hasJoinedSession = true;
+        }, 100);
+      } else {
+        console.log("Already joined session, skipping rejoin on reconnect");
+      }
+    });
+
+    ws.on("connect_error", (err) => {
+      console.error("Connection error:", err);
+      setError(`Connection failed: ${err.message}`);
+    });
+
+    ws.on("disconnect", (reason) => {
+      console.log("WebSocket disconnected:", reason);
+      setConnected(false);
+      // Only show error for unexpected disconnects
+      if (reason !== "io client disconnect") {
+        setError("Disconnected from server");
+      }
+    });
+
+    ws.on("session.ready", (data: any) => {
+      console.log("Session ready:", data);
+      setSessionData(data);
+    });
+
+    ws.on("session.startGame", (data: { gameType: string; gameId?: string }) => {
+      console.log("Game started (legacy):", data);
+      setGameType(data.gameType);
+      if (data.gameId) {
+        setGameId(data.gameId);
+      }
+    });
+
+    ws.on("session.gameCreated", (data: { gameId: string; gameType: string }) => {
+      console.log("Game created:", data);
+      setGameType(data.gameType);
+      setGameId(data.gameId);
+    });
+
+    // Handle game.started event with full game data
+    ws.on("game.started", (data: { gameId: string; gameType: string; state: any; players: any[] }) => {
+      console.log("Game started with state:", data);
+      setGameType(data.gameType);
+      setGameId(data.gameId);
+      setGameState(data.state);
+      setGamePlayers(data.players);
+    });
+
+    // Handle game state updates (for chess and other games)
+    ws.on("game.stateUpdate", (data: { gameId: string; state: any; lastMove?: any }) => {
+      console.log("Game state updated:", data);
+      setGameState(data.state);
+    });
+
+    // Handle game end
+    ws.on("game.end", (data: { gameId: string; winnerId: string | null; isDraw: boolean; reason: string }) => {
+      console.log("Game ended:", data);
+      // Update the game state to reflect the end
+      if (data.winnerId || data.isDraw) {
+        setGameState((prev: any) => ({
+          ...prev,
+          gameOver: true,
+          winner: data.winnerId,
+          isDraw: data.isDraw
+        }));
+      }
+      // Allow starting a new game after a delay
+      setTimeout(() => {
+        setGameType(null);
+        setGameId(null);
+        setGameState(null);
+        setGamePlayers([]);
+      }, 5000);
+    });
+
+    // Trivia events
+    ws.on("trivia.countdown", (data: { secondsRemaining: number }) => {
+      setGameState((prev: any) => ({
+        ...prev,
+        phase: 'countdown',
+        timeRemaining: data.secondsRemaining
+      }));
+    });
+
+    ws.on("trivia.question", (data: { questionNumber: number; totalQuestions: number; question: string; answers: string[]; category: string; difficulty: string; timeLimit: number }) => {
+      setGameState((prev: any) => ({
+        ...prev,
+        phase: 'question',
+        timeRemaining: data.timeLimit,
+        questionStartedAt: Date.now()
+      }));
+    });
+
+    ws.on("trivia.tick", (data: { timeRemaining: number }) => {
+      setGameState((prev: any) => ({
+        ...prev,
+        timeRemaining: data.timeRemaining
+      }));
+    });
+
+    ws.on("trivia.questionResult", (data: { correctAnswer: string; correctAnswerIndex: number; results: any[]; scores: any[] }) => {
+      setGameState((prev: any) => ({
+        ...prev,
+        phase: 'reveal',
+        currentAnswers: data.results,
+        players: data.scores
+      }));
+    });
+
+    ws.on("trivia.gameEnd", (data: { finalScores: any[]; winnerId: string | null; winnerIds: string[]; isDraw: boolean }) => {
+      setGameState((prev: any) => ({
+        ...prev,
+        phase: 'finished',
+        isFinished: true,
+        players: data.finalScores,
+        winnerId: data.winnerId,
+        winnerIds: data.winnerIds
+      }));
+      setTimeout(() => {
+        setGameType(null);
+        setGameId(null);
+        setGameState(null);
+        setGamePlayers([]);
+      }, 10000);
+    });
+
+    ws.on("session.end", (data: any) => {
+      alert("Session ended");
+      router.push("/play");
+    });
+
+    ws.on("error", (err: any) => {
+      console.error("Session error:", err);
+      setError(err.message || "Connection error occurred");
+      if (err.message) {
+        alert(`Error: ${err.message}`);
+      }
+    });
+
+    // Listen for wallet balance updates
+    ws.on("wallet.updated", (data: { balance: number }) => {
+      console.log("Wallet updated:", data);
+      setWalletBalance(data.balance);
+    });
+
+    // Listen for gift notifications (both sent and received)
+    ws.on("session.giftReceived", (data: { from: string; to: string; amount: number; success: boolean }) => {
+      console.log("Gift received event:", data);
+      if (data.success) {
+        // Determine if we're the sender or receiver
+        const token = localStorage.getItem("accessToken");
+        if (token) {
+          try {
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            const currentUserId = payload.sub;
+            const isReceived = data.to === currentUserId;
+            const otherUser = isReceived ? data.from : data.to;
+            showGiftNotification(otherUser, data.amount, isReceived);
+          } catch (e) {
+            console.error("Failed to parse token for gift notification:", e);
+          }
+        }
+      }
+    });
+
+    setSocket(ws);
+
+    return () => {
+      ws.disconnect();
+    };
+  }, [sessionId, router]);
+
+  const handleStartGame = (type: string) => {
+    if (socket) {
+      socket.emit("session.startGame", { sessionId, gameType: type });
+    }
+  };
+
+  const handleEndSession = async () => {
+    // Cleanup Agora
+    if (localTrackRef.current) {
+      localTrackRef.current.videoTrack?.stop();
+      localTrackRef.current.videoTrack?.close();
+      localTrackRef.current.audioTrack?.stop();
+      localTrackRef.current.audioTrack?.close();
+    }
+    if (clientRef.current) {
+      await clientRef.current.leave();
+    }
+
+    if (socket) {
+      socket.emit("session.end", { sessionId });
+    }
+    router.push("/play");
+  };
+
+  const handleSwapVideos = () => {
+    // Swap the video tracks between containers
+    if (localTrackRef.current?.videoTrack && remoteUserRef.current?.videoTrack) {
+      // Stop current playback
+      localTrackRef.current.videoTrack.stop();
+      remoteUserRef.current.videoTrack.stop();
+      
+      // Swap and re-play based on current state
+      if (videosSwapped) {
+        // Currently swapped: local in main, remote in overlay
+        // After swap: remote in main, local in overlay (default)
+        if (mainVideoRef.current) {
+          // @ts-ignore
+          remoteUserRef.current.videoTrack.play(mainVideoRef.current);
+        }
+        if (overlayVideoRef.current) {
+          // @ts-ignore
+          localTrackRef.current.videoTrack.play(overlayVideoRef.current);
+        }
+      } else {
+        // Currently default: remote in main, local in overlay
+        // After swap: local in main, remote in overlay (swapped)
+        if (mainVideoRef.current) {
+          // @ts-ignore
+          localTrackRef.current.videoTrack.play(mainVideoRef.current);
+        }
+        if (overlayVideoRef.current) {
+          // @ts-ignore
+          remoteUserRef.current.videoTrack.play(overlayVideoRef.current);
+        }
+      }
+    } else if (localTrackRef.current?.videoTrack) {
+      // Only local video available - just move it
+      localTrackRef.current.videoTrack.stop();
+      const targetContainer = videosSwapped ? mainVideoRef.current : overlayVideoRef.current;
+      if (targetContainer) {
+        // @ts-ignore
+        localTrackRef.current.videoTrack.play(targetContainer);
+      }
+    } else if (remoteUserRef.current?.videoTrack) {
+      // Only remote video available - just move it
+      remoteUserRef.current.videoTrack.stop();
+      const targetContainer = videosSwapped ? overlayVideoRef.current : mainVideoRef.current;
+      if (targetContainer) {
+        // @ts-ignore
+        remoteUserRef.current.videoTrack.play(targetContainer);
+      }
+    }
+    setVideosSwapped(!videosSwapped);
+  };
+
+  const handleFullscreen = (element: HTMLElement) => {
+    if (!document.fullscreenElement) {
+      element.requestFullscreen().catch((err) => {
+        alert(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+      });
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  const handleSendGift = () => {
+    if (walletBalance <= 0) {
+      alert("You don't have any tokens to send. Please purchase tokens first.");
+      return;
+    }
+    
+    const amount = prompt(`Enter token amount to send as gift (you have ${walletBalance} tokens):`);
+    if (amount && socket) {
+      const amountNum = parseInt(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        alert("Please enter a valid positive number");
+        return;
+      }
+      if (amountNum > walletBalance) {
+        alert(`Insufficient tokens. You have ${walletBalance} tokens.`);
+        return;
+      }
+      socket.emit("session.sendGift", { sessionId, amountTokens: amountNum });
+    }
+  };
+
+  return (
+    <main className="space-y-4 relative">
+      {/* Gift Notification Popup */}
+      {giftNotification && (
+        <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg border-2 animate-pulse ${
+          giftNotification.isReceived 
+            ? "bg-green-900 border-green-500" 
+            : "bg-blue-900 border-blue-500"
+        }`}>
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">{giftNotification.isReceived ? "🎁" : "💝"}</span>
+            <div>
+              <p className="font-bold text-white">
+                {giftNotification.isReceived ? "Gift Received!" : "Gift Sent!"}
+              </p>
+              <p className="text-sm text-gray-200">
+                {giftNotification.isReceived 
+                  ? `You received ${giftNotification.amount} tokens`
+                  : `You sent ${giftNotification.amount} tokens`
+                }
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setGiftNotification(null)}
+            className="absolute top-1 right-2 text-gray-400 hover:text-white text-sm"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm uppercase tracking-[0.25em] text-gray-400">Session</p>
+          <h1 className="text-3xl font-semibold text-white">Video Call</h1>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Wallet Balance Display */}
+          <div className="bg-gradient-to-r from-yellow-900 to-yellow-700 px-4 py-2 border-2 border-yellow-500 flex items-center gap-2">
+            <span className="text-xl">💰</span>
+            <div>
+              <p className="text-xs text-yellow-300 uppercase tracking-wide">Balance</p>
+              <p className="font-bold text-white">{walletBalance.toLocaleString()} tokens</p>
+            </div>
+          </div>
+          <button
+            onClick={handleEndSession}
+            className="bg-gray-800 px-4 py-2 font-semibold text-white border-2 border-white/30 hover:bg-gray-700"
+          >
+            End Session
+          </button>
+        </div>
+      </div>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <p className="text-sm text-gray-400">
+            {connected ? "Connected" : "Connecting..."} | Session ID: {sessionId.slice(0, 8)}...
+            {sessionStartTime && (
+              <span className="ml-2 text-green-400">⏱ {formatDuration(sessionDuration)}</span>
+            )}
+          </p>
+          {videoReady && (
+            <p className="text-xs text-gray-500 mt-1">
+              Video: {localVideoActive ? "✓ Local" : "✗ Local"} | {remoteVideoActive ? "✓ Remote" : "✗ Remote"}
+              {remoteUserInfo && (
+                <span className="ml-2">| Remote: {String(remoteUserInfo.uid).slice(0, 8)}...</span>
+              )}
+            </p>
+          )}
+          {networkQuality.downlink > 0 && (
+            <p className="text-xs mt-1">
+              Network: <span className={getNetworkQualityLabel(networkQuality.downlink).color}>
+                {getNetworkQualityLabel(networkQuality.downlink).label}
+              </span>
+              {connectionState !== "CONNECTED" && connectionState !== "DISCONNECTED" && (
+                <span className="ml-2 text-yellow-400">({connectionState})</span>
+              )}
+            </p>
+          )}
+          {error && (
+            <p className="text-sm text-red-400 mt-1">Error: {error}</p>
+          )}
+        </div>
+        {/* Audio/Video Controls */}
+        {videoReady && (
+          <div className="flex gap-2">
+            <button
+              onClick={toggleMute}
+              className={`px-3 py-1 text-sm border-2 transition-colors ${
+                isMuted 
+                  ? "bg-red-600 border-red-500 text-white" 
+                  : "bg-gray-800 border-white/30 text-white hover:bg-gray-700"
+              }`}
+              title={isMuted ? "Unmute" : "Mute"}
+            >
+              {isMuted ? "🔇 Muted" : "🔊 Audio"}
+            </button>
+            <button
+              onClick={toggleCamera}
+              className={`px-3 py-1 text-sm border-2 transition-colors ${
+                isCameraOff 
+                  ? "bg-red-600 border-red-500 text-white" 
+                  : "bg-gray-800 border-white/30 text-white hover:bg-gray-700"
+              }`}
+              title={isCameraOff ? "Turn Camera On" : "Turn Camera Off"}
+            >
+              {isCameraOff ? "📷 Off" : "📹 Video"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="bg-gray-900 p-6 border border-white/20 md:col-span-2 space-y-4">
+          {/* Video Section */}
+          <div 
+            ref={videoContainerRef}
+            className="aspect-video bg-black border border-white/20 relative"
+          >
+            {/* Main video container (shows remote by default, local when swapped) */}
+            <div
+              ref={mainVideoRef}
+              className="absolute inset-0 w-full h-full bg-black"
+              style={{ minWidth: '100%', minHeight: '100%' }}
+            />
+            {!remoteVideoActive && !videosSwapped && (
+              <div className="absolute inset-0 flex items-center justify-center text-gray-500 z-10 pointer-events-none">
+                <div className="text-center">
+                  <p className="text-sm">Waiting for remote video...</p>
+                  <p className="text-xs mt-1 text-gray-600">The other user's video will appear here</p>
+                  {remoteUserInfo && (
+                    <p className="text-xs mt-2 text-gray-400">
+                      Remote user connected: {String(remoteUserInfo.uid).slice(0, 8)}...
+                      <br />
+                      Video track: {remoteUserInfo.hasVideo ? "✓" : "✗"} | Audio: {remoteUserInfo.hasAudio ? "✓" : "✗"}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+            {!localVideoActive && videosSwapped && (
+              <div className="absolute inset-0 flex items-center justify-center text-gray-500 z-5">
+                <div className="text-center">
+                  <p className="text-sm">Waiting for local video...</p>
+                </div>
+              </div>
+            )}
+            
+            {/* Small overlay video container (shows local by default, remote when swapped) */}
+            <div
+              ref={overlayVideoRef}
+              onClick={(e) => {
+                e.stopPropagation();
+                // Show context menu: swap or fullscreen
+                const choice = confirm("Click OK to swap videos, or Cancel to fullscreen");
+                if (choice) {
+                  handleSwapVideos();
+                } else {
+                  handleFullscreen(videoContainerRef.current!);
+                }
+              }}
+              onDoubleClick={() => handleFullscreen(videoContainerRef.current!)}
+              className="absolute bottom-4 right-4 w-48 h-36 border-2 border-white bg-black z-10 cursor-pointer hover:border-gray-400 transition-all"
+              style={{ minWidth: '192px', minHeight: '144px' }}
+              title="Click to swap, double-click to fullscreen"
+            >
+              {!localVideoActive && !videosSwapped && (
+                <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-xs">
+                  Your video
+                </div>
+              )}
+              {!remoteVideoActive && videosSwapped && (
+                <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-xs">
+                  Other user
+                </div>
+              )}
+            </div>
+            
+            {/* Show loading/status overlay when video is not ready */}
+            {!videoReady && (
+              <div className="absolute inset-0 flex items-center justify-center text-gray-400 z-20 bg-black bg-opacity-75">
+                <div className="text-center">
+                  {sessionData?.video ? (
+                    <>
+                      <p className="mb-2">Initializing video call...</p>
+                      <p className="text-xs">Please allow camera and microphone access</p>
+                      {error && (
+                        <p className="text-xs text-red-400 mt-2 max-w-md">{error}</p>
+                      )}
+                      <p className="text-xs mt-2 text-gray-500">Check browser console for details</p>
+                    </>
+                  ) : (
+                    <p className="text-gray-500">
+                      {connected ? "Loading session data..." : "Connecting to server..."}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Game Section - Always visible alongside video */}
+          {gameType && gameId && gameType === "TICTACTOE" ? (
+            <TicTacToeGame
+              gameId={gameId}
+              socket={socket!}
+              userId={userId}
+              initialState={gameState}
+              initialPlayers={gamePlayers}
+              onGameEnd={(result) => {
+                console.log("Game ended:", result);
+                // Allow starting a new game after a short delay
+                setTimeout(() => {
+                  setGameType(null);
+                  setGameId(null);
+                  setGameState(null);
+                  setGamePlayers([]);
+                }, 5000); // 5 second delay before allowing new game
+              }}
+            />
+          ) : gameType && gameId && gameType === "CHESS" && gameState ? (
+            <ChessGame
+              gameState={gameState}
+              odUserId={userId}
+              onMove={(from, to, promotionPiece) => {
+                if (socket) {
+                  socket.emit("game.move", { gameId, from, to, promotionPiece });
+                }
+              }}
+              onForfeit={() => {
+                if (socket) {
+                  socket.emit("game.forfeit", { gameId });
+                }
+              }}
+            />
+          ) : gameType && gameId && gameType === "TRIVIA" && gameState ? (
+            <TriviaGame
+              gameState={gameState}
+              odUserId={userId}
+              socket={socket}
+              onAnswer={(questionIndex, answerIndex) => {
+                if (socket) {
+                  socket.emit("trivia.answer", { gameId, questionIndex, answerIndex });
+                }
+              }}
+            />
+          ) : gameType ? (
+            <div className="bg-gray-800 p-4 border border-white/20">
+              <p className="text-sm text-gray-300 mb-2">Active game: {gameType}</p>
+              <div className="bg-black p-8 text-center text-gray-400 min-h-[200px] flex items-center justify-center">
+                <div>
+                  <p className="text-lg mb-2">Game UI for {gameType}</p>
+                  <p className="text-xs">Game implementation coming soon</p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-gray-800 p-4 border border-white/20">
+              <p className="text-sm text-gray-400 mb-3">Start a game</p>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => handleStartGame("CHESS")}
+                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                >
+                  Chess
+                </button>
+                <button
+                  onClick={() => handleStartGame("TRIVIA")}
+                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                >
+                  Trivia
+                </button>
+                <button
+                  onClick={() => handleStartGame("TICTACTOE")}
+                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                >
+                  Tic-Tac-Toe
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3">
+          <div className="bg-gray-900 p-4 border border-white/20">
+            <p className="text-sm text-gray-400 mb-3">Actions</p>
+            <div className="space-y-2">
+              <button
+                onClick={handleSendGift}
+                className="w-full bg-gray-800 px-4 py-2 text-white border-2 border-white/30 hover:bg-gray-700"
+              >
+                Send Gift
+              </button>
+              <button
+                onClick={() => {
+                  const reason = prompt("Report reason:");
+                  if (reason && socket) {
+                    socket.emit("session.report", { sessionId, reason });
+                    alert("Report submitted");
+                  }
+                }}
+                className="w-full bg-gray-800 px-4 py-2 text-white border-2 border-white/30 hover:bg-gray-700"
+              >
+                Report User
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-gray-900 p-4 border border-white/20">
+            <p className="text-sm text-gray-400 mb-2">Session Info</p>
+            <div className="text-xs text-gray-500 space-y-1">
+              <p>Peer: {sessionData?.peer.id || "Loading..."}</p>
+              <p>Channel: {sessionData?.video.channelName || "Loading..."}</p>
+              {sessionData?.video.expiresAt && (
+                <p>Token expires: {new Date(sessionData.video.expiresAt).toLocaleTimeString()}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+
