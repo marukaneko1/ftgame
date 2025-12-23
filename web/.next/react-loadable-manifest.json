@@ -1,1 +1,26 @@
-{}
+{
+  "components/games/BilliardsGameV2.tsx -> @/lib/billiards/container": {
+    "id": "components/games/BilliardsGameV2.tsx -> @/lib/billiards/container",
+    "files": [
+      "static/chunks/_app-pages-browser_src_lib_billiards_container_ts.js"
+    ]
+  },
+  "components/games/BilliardsGameV2.tsx -> @/lib/billiards/events/beginevent": {
+    "id": "components/games/BilliardsGameV2.tsx -> @/lib/billiards/events/beginevent",
+    "files": [
+      "static/chunks/_app-pages-browser_src_lib_billiards_events_beginevent_ts.js"
+    ]
+  },
+  "components/games/BilliardsGameV2.tsx -> @/lib/billiards/events/keyboard": {
+    "id": "components/games/BilliardsGameV2.tsx -> @/lib/billiards/events/keyboard",
+    "files": [
+      "static/chunks/_app-pages-browser_src_lib_billiards_events_keyboard_ts.js"
+    ]
+  },
+  "components/games/BilliardsGameV2.tsx -> @/lib/billiards/view/assets": {
+    "id": "components/games/BilliardsGameV2.tsx -> @/lib/billiards/view/assets",
+    "files": [
+      "static/chunks/_app-pages-browser_src_lib_billiards_view_assets_ts.js"
+    ]
+  }
+}

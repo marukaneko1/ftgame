@@ -268,23 +268,18 @@ export default function ChessGame({ gameState, odUserId, onMove, onForfeit }: Ch
   };
 
   // Render a square
-  // visualRow/visualCol: position on screen (0 = top-left)
-  // boardRow/boardCol: actual position in the game state array
-  const renderSquare = (visualRow: number, visualCol: number) => {
-    // Convert visual position to board position
-    // For white: visual top (row 0) = board row 0 (black's back rank)
-    // For black: visual top (row 0) = board row 7 (white's back rank) - need to flip
-    const boardRow = shouldFlipBoard ? 7 - visualRow : visualRow;
-    const boardCol = shouldFlipBoard ? 7 - visualCol : visualCol;
+  const renderSquare = (displayRow: number, displayCol: number) => {
+    // Convert display coordinates to actual board coordinates
+    // When flipped (black player), row 0-7 maps to actual row 7-0, and col 0-7 maps to actual col 7-0
+    const actualRow = shouldFlipBoard ? 7 - displayRow : displayRow;
+    const actualCol = shouldFlipBoard ? 7 - displayCol : displayCol;
 
-    const piece = gameState.board[boardRow][boardCol];
-    
-    // Square color is based on visual position for consistent look
-    const isLight = (visualRow + visualCol) % 2 === 0;
-    const isSelected = selectedSquare?.row === boardRow && selectedSquare?.col === boardCol;
-    const isValidMove = validMoves.some(m => m.row === boardRow && m.col === boardCol);
-    const isLastMoveFrom = lastMove?.from.row === boardRow && lastMove?.from.col === boardCol;
-    const isLastMoveTo = lastMove?.to.row === boardRow && lastMove?.to.col === boardCol;
+    const piece = gameState.board[actualRow][actualCol];
+    const isLight = (displayRow + displayCol) % 2 === 0;
+    const isSelected = selectedSquare?.row === actualRow && selectedSquare?.col === actualCol;
+    const isValidMove = validMoves.some(m => m.row === actualRow && m.col === actualCol);
+    const isLastMoveFrom = lastMove?.from.row === actualRow && lastMove?.from.col === actualCol;
+    const isLastMoveTo = lastMove?.to.row === actualRow && lastMove?.to.col === actualCol;
     const isKingInCheck = gameState.isCheck && piece?.type === 'K' && piece?.color === gameState.currentTurn;
 
     let bgColor = isLight ? 'bg-amber-100' : 'bg-amber-700';
@@ -292,15 +287,11 @@ export default function ChessGame({ gameState, odUserId, onMove, onForfeit }: Ch
     else if (isLastMoveFrom || isLastMoveTo) bgColor = isLight ? 'bg-yellow-200' : 'bg-yellow-600';
     else if (isKingInCheck) bgColor = 'bg-red-500';
 
-    // Calculate rank/file labels based on board orientation
-    const rankLabel = shouldFlipBoard ? boardRow + 1 : 8 - boardRow;
-    const fileLabel = FILES[boardCol];
-
     return (
       <div
-        key={`${visualRow}-${visualCol}`}
+        key={`${displayRow}-${displayCol}`}
         className={`relative w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 flex items-center justify-center cursor-pointer ${bgColor} transition-colors`}
-        onClick={() => handleSquareClick(boardRow, boardCol)}
+        onClick={() => handleSquareClick(actualRow, actualCol)}
       >
         {/* Piece */}
         {piece && (
@@ -321,15 +312,15 @@ export default function ChessGame({ gameState, odUserId, onMove, onForfeit }: Ch
           <div className="absolute inset-0 border-4 border-red-500 opacity-60 rounded-sm" />
         )}
 
-        {/* Coordinates - show rank on left edge, file on bottom edge */}
-        {visualCol === 0 && (
+        {/* Coordinates */}
+        {displayCol === 0 && (
           <span className="absolute left-0.5 top-0.5 text-[10px] font-bold text-gray-600">
-            {rankLabel}
+            {8 - displayRow}
           </span>
         )}
-        {visualRow === 7 && (
+        {displayRow === 7 && (
           <span className="absolute right-0.5 bottom-0 text-[10px] font-bold text-gray-600">
-            {fileLabel}
+            {FILES[displayCol]}
           </span>
         )}
       </div>

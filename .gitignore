@@ -1,1 +1,9 @@
 .env
+.env.*
+!.env.example
+.env.bak
+*.bak
+node_modules/
+.next/
+dist/
+.DS_Store

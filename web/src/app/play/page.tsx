@@ -125,7 +125,7 @@ export default function PlayPage() {
         return;
       }
       // Otherwise, try with existing token (might still work)
-      console.log("[PlayPage] Token refresh failed (non-critical), using existing token:", refreshError.response?.status, refreshError.message);
+      console.warn("[PlayPage] Token refresh failed (non-critical), using existing token");
     }
 
     // Ensure token exists after potential refresh
@@ -157,7 +157,6 @@ export default function PlayPage() {
     
     // Token is guaranteed to be string at this point
     const authToken = token;
-    console.log("[PlayPage] Connecting WebSocket with token (preview):", authToken.substring(0, 20) + "...");
     
     // Connect to WebSocket (using configurable URL)
     const ws = io(`${WS_URL}/ws`, {

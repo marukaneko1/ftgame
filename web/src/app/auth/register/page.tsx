@@ -25,7 +25,37 @@ export default function RegisterPage() {
       await authApi.register(email, password, displayName, username, dateOfBirth);
       router.push("/dashboard");
     } catch (err: any) {
-      setError(err.response?.data?.message || "Registration failed. Please try again.");
+      console.error("Registration error:", err);
+      
+      // Handle different error formats
+      let errorMessage = "Registration failed. Please try again.";
+      
+      if (err.response?.data) {
+        const data = err.response.data;
+        
+        // Handle validation errors (array format)
+        if (Array.isArray(data.message)) {
+          errorMessage = data.message.join(". ");
+        }
+        // Handle single message string
+        else if (typeof data.message === "string") {
+          errorMessage = data.message;
+        }
+        // Handle error object format
+        else if (data.error && Array.isArray(data.message)) {
+          errorMessage = `${data.error}: ${data.message.join(". ")}`;
+        }
+      }
+      // Handle network errors
+      else if (err.message && err.message.includes("Network Error")) {
+        errorMessage = "Cannot connect to server. Please check that the API server is running.";
+      }
+      // Handle other errors
+      else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

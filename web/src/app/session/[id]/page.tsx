@@ -8,6 +8,10 @@ import { videoApi, usersApi, walletApi } from "@/lib/api";
 import TicTacToeGame from "@/components/games/TicTacToeGame";
 import ChessGame from "@/components/games/ChessGame";
 import TriviaGame from "@/components/games/TriviaGame";
+import TruthsAndLieGame from "@/components/games/TruthsAndLieGame";
+import BilliardsGame from "@/components/games/BilliardsGame";
+import BilliardsGameV2 from "@/components/games/BilliardsGameV2";
+import BackButton from "@/components/BackButton";
 
 // Configurable WebSocket URL
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://localhost:3001";
@@ -267,7 +271,7 @@ export default function SessionPage() {
         console.log("Joining channel:", sessionData.video.channelName);
         console.log("Using userId (account):", userId);
         console.log("App ID:", appId);
-        console.log("Token preview:", sessionData.video.token.substring(0, 50) + "...");
+        // Token loaded successfully (not logging for security)
         
         // Join channel - when using buildTokenWithAccount, pass the account string as uid
         // The token contains the account info, so we pass the same userId
@@ -283,10 +287,22 @@ export default function SessionPage() {
             console.log("👤 Found existing remote user:", remoteUser.uid);
             // Subscribe to existing remote user's tracks
             try {
-              // Subscribe to both video and audio
-              await client.subscribe(remoteUser, "video");
-              await client.subscribe(remoteUser, "audio");
-              console.log("✅ Subscribed to existing remote user tracks");
+              // Subscribe to both video and audio (handle errors gracefully if one isn't available)
+              try {
+                await client.subscribe(remoteUser, "video");
+                console.log("✅ Subscribed to existing remote user video");
+              } catch (videoError: any) {
+                console.log("ℹ️ Video not available for existing user:", videoError?.message || "Unknown error");
+              }
+              
+              try {
+                await client.subscribe(remoteUser, "audio");
+                console.log("✅ Subscribed to existing remote user audio");
+              } catch (audioError: any) {
+                console.log("ℹ️ Audio not available for existing user:", audioError?.message || "Unknown error");
+              }
+              
+              console.log("✅ Finished subscribing to existing remote user tracks");
               remoteUserRef.current = remoteUser;
               // Update state for UI (refs don't trigger re-renders)
               setRemoteUserInfo({
@@ -300,6 +316,17 @@ export default function SessionPage() {
                 remoteUser.audioTrack.play();
                 console.log("🔊 Playing existing remote user's audio");
               }
+              
+              // Helper function to verify video is actually playing
+              const verifyVideoPlaying = (videoElement: HTMLVideoElement | null): boolean => {
+                if (!videoElement) return false;
+                // Check if video element exists, is not paused, and has video data
+                const isPlaying = !videoElement.paused && 
+                                 videoElement.readyState >= 2 && // HAVE_CURRENT_DATA or higher
+                                 videoElement.videoWidth > 0 && 
+                                 videoElement.videoHeight > 0;
+                return isPlaying;
+              };
               
               // Multiple retries for video track to ensure it's ready
               const tryPlayRemoteVideo = (attempt = 0) => {
@@ -322,31 +349,53 @@ export default function SessionPage() {
                     // @ts-ignore
                     remoteUser.videoTrack.play(mainVideoRef.current);
                     
-                    // Verify video element was created
+                    // Verify video element was created and is actually playing
                     setTimeout(() => {
-                      const videoElement = mainVideoRef.current?.querySelector('video');
-                      if (videoElement) {
-                        console.log("✅ Existing remote video element created. Dimensions:", videoElement.videoWidth, "x", videoElement.videoHeight);
+                      const videoElement = mainVideoRef.current?.querySelector('video') as HTMLVideoElement;
+                      if (videoElement && verifyVideoPlaying(videoElement)) {
+                        console.log("✅ Existing remote video element created and playing. Dimensions:", videoElement.videoWidth, "x", videoElement.videoHeight);
                         setRemoteVideoActive(true);
+                      } else if (videoElement) {
+                        // Element exists but not playing - try to fix it
+                        console.warn("⚠️ Video element exists but not playing properly. Attempting fix...");
+                        try {
+                          videoElement.play().catch(() => {
+                            // If play() fails, retry
+                            if (attempt < 8) {
+                              setTimeout(() => tryPlayRemoteVideo(attempt + 1), 300);
+                            }
+                          });
+                          // Check again after a moment
+                          setTimeout(() => {
+                            if (verifyVideoPlaying(videoElement)) {
+                              setRemoteVideoActive(true);
+                            } else if (attempt < 8) {
+                              setTimeout(() => tryPlayRemoteVideo(attempt + 1), 300);
+                            }
+                          }, 500);
+                        } catch (e) {
+                          if (attempt < 8) {
+                            setTimeout(() => tryPlayRemoteVideo(attempt + 1), 300);
+                          }
+                        }
                       } else {
                         console.error("❌ Video element not found after play()");
-                        if (attempt < 5) {
+                        if (attempt < 8) {
                           setTimeout(() => tryPlayRemoteVideo(attempt + 1), 500);
                         }
                       }
-                    }, 200);
+                    }, 300);
                     
-                    console.log("✅ Playing existing remote user's video in main container");
-                    setRemoteVideoActive(true);
+                    console.log("✅ Playing existing remote user's video in main container (attempt", attempt + ")");
                   } catch (playError: any) {
                     console.error(`❌ Error playing existing remote video (attempt ${attempt}):`, playError?.message || playError);
-                    if (attempt < 10) {
-                      setTimeout(() => tryPlayRemoteVideo(attempt + 1), 300 * (attempt + 1));
+                    if (attempt < 12) {
+                      setTimeout(() => tryPlayRemoteVideo(attempt + 1), Math.min(300 * (attempt + 1), 2000));
                     }
                   }
-                } else if (attempt < 15) {
+                } else if (attempt < 20) {
                   console.log(`⏳ Video track or container not ready (track: ${!!remoteUser.videoTrack}, container: ${!!mainVideoRef.current})`);
-                  setTimeout(() => tryPlayRemoteVideo(attempt + 1), 150 * (attempt + 1));
+                  setTimeout(() => tryPlayRemoteVideo(attempt + 1), Math.min(150 * (attempt + 1), 1000));
                 } else {
                   console.error("❌ Remote video track never became available");
                 }
@@ -354,6 +403,14 @@ export default function SessionPage() {
               
               // Start trying to play video immediately and with retries
               setTimeout(() => tryPlayRemoteVideo(), 100);
+              
+              // Also set up a one-time check after a longer delay to catch missed cases
+              setTimeout(() => {
+                if (isMounted && remoteUser.videoTrack && mainVideoRef.current && !remoteVideoActiveRef.current) {
+                  console.log("🔄 Delayed check: Attempting to play existing remote video");
+                  tryPlayRemoteVideo(0);
+                }
+              }, 2000);
               
             } catch (subError: any) {
               console.error("❌ Error subscribing to existing remote user:", subError?.message || subError);
@@ -431,25 +488,50 @@ export default function SessionPage() {
         client.on("user-published", async (user, mediaType) => {
           console.log("🔔 Remote user published:", mediaType, "User ID:", user.uid);
           try {
+            // Subscribe to the specific media type that was published
             await client.subscribe(user, mediaType);
             console.log("✅ Subscribed to", mediaType, "for user", user.uid);
+            
+            // Also try to subscribe to the other media type if it might be available
+            // This handles cases where video and audio are published separately
+            const otherMediaType = mediaType === "video" ? "audio" : "video";
+            try {
+              await client.subscribe(user, otherMediaType);
+              console.log("✅ Also subscribed to", otherMediaType, "for user", user.uid);
+            } catch (e: any) {
+              // It's okay if the other media type isn't available yet
+              // It will be subscribed when it's published
+              console.log("ℹ️", otherMediaType, "not available yet for user", user.uid, "- will subscribe when published");
+            }
+            
             remoteUserRef.current = user;
             // Update state for UI (refs don't trigger re-renders)
             setRemoteUserInfo(prev => ({
               uid: user.uid,
-              hasVideo: mediaType === "video" ? true : (prev?.hasVideo || false),
-              hasAudio: mediaType === "audio" ? true : (prev?.hasAudio || false)
+              hasVideo: mediaType === "video" ? true : (prev?.hasVideo || !!user.videoTrack),
+              hasAudio: mediaType === "audio" ? true : (prev?.hasAudio || !!user.audioTrack)
             }));
             
             // Play audio immediately if available
-            if (mediaType === "audio" && user.audioTrack) {
+            if (user.audioTrack) {
               user.audioTrack.play();
               console.log("🔊 Remote audio playing for user:", user.uid);
             }
             
             // For video, try multiple times with exponential backoff
-            if (mediaType === "video") {
+            if (user.videoTrack) {
               console.log("📹 Video track available:", !!user.videoTrack, "Main container:", !!mainVideoRef.current);
+              
+              // Helper function to verify video is actually playing
+              const verifyVideoPlaying = (videoElement: HTMLVideoElement | null): boolean => {
+                if (!videoElement) return false;
+                // Check if video element exists, is not paused, and has video data
+                const isPlaying = !videoElement.paused && 
+                                 videoElement.readyState >= 2 && // HAVE_CURRENT_DATA or higher
+                                 videoElement.videoWidth > 0 && 
+                                 videoElement.videoHeight > 0;
+                return isPlaying;
+              };
               
               const tryPlayVideo = (attempt = 0) => {
                 if (!isMounted) {
@@ -471,35 +553,56 @@ export default function SessionPage() {
                     // @ts-ignore
                     user.videoTrack.play(mainVideoRef.current);
                     
-                    // Verify video element was created
+                    // Verify video element was created and is actually playing
                     setTimeout(() => {
-                      const videoElement = mainVideoRef.current?.querySelector('video');
-                      if (videoElement) {
-                        console.log("✅ Remote video element created successfully. Video dimensions:", videoElement.videoWidth, "x", videoElement.videoHeight);
-                        console.log("Video element:", videoElement);
+                      const videoElement = mainVideoRef.current?.querySelector('video') as HTMLVideoElement;
+                      if (videoElement && verifyVideoPlaying(videoElement)) {
+                        console.log("✅ Remote video element created and playing. Video dimensions:", videoElement.videoWidth, "x", videoElement.videoHeight);
                         setRemoteVideoActive(true);
+                      } else if (videoElement) {
+                        // Element exists but not playing - try to fix it
+                        console.warn("⚠️ Video element exists but not playing properly. Attempting fix...");
+                        try {
+                          videoElement.play().catch(() => {
+                            // If play() fails, retry
+                            if (attempt < 8) {
+                              setTimeout(() => tryPlayVideo(attempt + 1), 300);
+                            }
+                          });
+                          // Check again after a moment
+                          setTimeout(() => {
+                            if (verifyVideoPlaying(videoElement)) {
+                              setRemoteVideoActive(true);
+                            } else if (attempt < 8) {
+                              setTimeout(() => tryPlayVideo(attempt + 1), 300);
+                            }
+                          }, 500);
+                        } catch (e) {
+                          if (attempt < 8) {
+                            setTimeout(() => tryPlayVideo(attempt + 1), 300);
+                          }
+                        }
                       } else {
                         console.error("❌ Video element not found in container after play()");
-                        if (attempt < 5) {
+                        if (attempt < 8) {
                           setTimeout(() => tryPlayVideo(attempt + 1), 500);
                         }
                       }
-                    }, 200);
+                    }, 300);
                     
-                    console.log("✅ Remote video playing for user:", user.uid, "in main container (attempt", attempt + ")");
-                    setRemoteVideoActive(true);
+                    console.log("✅ Remote video play() called for user:", user.uid, "in main container (attempt", attempt + ")");
                   } catch (playError: any) {
                     console.error(`❌ Error playing remote video (attempt ${attempt}):`, playError?.message || playError);
-                    if (attempt < 10) {
-                      setTimeout(() => tryPlayVideo(attempt + 1), 300 * (attempt + 1));
+                    if (attempt < 12) {
+                      setTimeout(() => tryPlayVideo(attempt + 1), Math.min(300 * (attempt + 1), 2000));
                     } else {
                       console.error("❌ Failed to play remote video after", attempt, "attempts");
                     }
                   }
                 } else {
                   console.log(`⏳ Video track or container not ready (track: ${!!user.videoTrack}, container: ${!!mainVideoRef.current})`);
-                  if (attempt < 15) {
-                    setTimeout(() => tryPlayVideo(attempt + 1), 150 * (attempt + 1));
+                  if (attempt < 20) {
+                    setTimeout(() => tryPlayVideo(attempt + 1), Math.min(150 * (attempt + 1), 1000));
                   } else {
                     console.error("❌ Remote video track or container never became available after", attempt, "attempts");
                   }
@@ -508,9 +611,32 @@ export default function SessionPage() {
               
               // Start trying immediately and with retries
               setTimeout(() => tryPlayVideo(), 100);
+              
+              // Also set up a one-time check after a longer delay to catch missed cases
+              setTimeout(() => {
+                if (isMounted && user.videoTrack && mainVideoRef.current && !remoteVideoActiveRef.current) {
+                  console.log("🔄 Delayed check: Attempting to play remote video");
+                  tryPlayVideo(0);
+                }
+              }, 2000);
             }
           } catch (subError: any) {
             console.error("❌ Error subscribing to remote user:", subError?.message || subError);
+            // Retry subscription after a short delay
+            setTimeout(async () => {
+              try {
+                await client.subscribe(user, mediaType);
+                console.log("✅ Retry: Subscribed to", mediaType, "for user", user.uid);
+                // Try to play the track if it's now available
+                if (mediaType === "video" && user.videoTrack && mainVideoRef.current) {
+                  user.videoTrack.play(mainVideoRef.current);
+                } else if (mediaType === "audio" && user.audioTrack) {
+                  user.audioTrack.play();
+                }
+              } catch (retryError) {
+                console.error("❌ Retry subscription also failed:", retryError);
+              }
+            }, 1000);
           }
         });
 
@@ -533,12 +659,51 @@ export default function SessionPage() {
 
         // Periodic check to ensure videos are playing (fallback for edge cases)
         videoCheckIntervalRef.current = setInterval(() => {
-          if (!isMounted) {
+          if (!isMounted || !clientRef.current) {
             if (videoCheckIntervalRef.current) {
               clearInterval(videoCheckIntervalRef.current);
               videoCheckIntervalRef.current = null;
             }
             return;
+          }
+          
+          // Check for remote users we might have missed subscribing to
+          const remoteUsers = clientRef.current.remoteUsers;
+          for (const remoteUser of remoteUsers) {
+            // If we don't have a reference to this user, or if tracks are missing, try to subscribe
+            if (!remoteUserRef.current || remoteUserRef.current.uid !== remoteUser.uid) {
+              // New user detected, try to subscribe to both tracks
+              if (!remoteUser.videoTrack) {
+                clientRef.current.subscribe(remoteUser, "video").catch((e: any) => {
+                  console.log("ℹ️ Periodic check: Video not available for user", remoteUser.uid);
+                });
+              }
+              if (!remoteUser.audioTrack) {
+                clientRef.current.subscribe(remoteUser, "audio").catch((e: any) => {
+                  console.log("ℹ️ Periodic check: Audio not available for user", remoteUser.uid);
+                });
+              }
+              remoteUserRef.current = remoteUser;
+              setRemoteUserInfo({
+                uid: remoteUser.uid,
+                hasVideo: !!remoteUser.videoTrack,
+                hasAudio: !!remoteUser.audioTrack
+              });
+            } else {
+              // User is known, but check if we're missing tracks
+              if (remoteUser.videoTrack && !remoteUserRef.current.videoTrack) {
+                console.log("🔄 Periodic check: Found video track for known user, subscribing...");
+                clientRef.current.subscribe(remoteUser, "video").catch((e: any) => {
+                  console.log("ℹ️ Periodic check: Could not subscribe to video", e?.message);
+                });
+              }
+              if (remoteUser.audioTrack && !remoteUserRef.current.audioTrack) {
+                console.log("🔄 Periodic check: Found audio track for known user, subscribing...");
+                clientRef.current.subscribe(remoteUser, "audio").catch((e: any) => {
+                  console.log("ℹ️ Periodic check: Could not subscribe to audio", e?.message);
+                });
+              }
+            }
           }
           
           // Check local video - try to attach if track exists and container is available
@@ -561,7 +726,13 @@ export default function SessionPage() {
           if (remoteUserRef.current?.videoTrack && mainVideoRef.current) {
             // Check if video is actually playing by checking the element
             const videoElement = mainVideoRef.current.querySelector('video') as HTMLVideoElement;
-            if (!videoElement || videoElement.paused || videoElement.readyState === 0) {
+            const isVideoActuallyPlaying = videoElement && 
+                                         !videoElement.paused && 
+                                         videoElement.readyState >= 2 && // HAVE_CURRENT_DATA or higher
+                                         videoElement.videoWidth > 0 && 
+                                         videoElement.videoHeight > 0;
+            
+            if (!isVideoActuallyPlaying) {
               try {
                 // Stop first to ensure clean state
                 try {
@@ -574,14 +745,31 @@ export default function SessionPage() {
                 remoteUserRef.current.videoTrack.play(mainVideoRef.current);
                 console.log("🔄 Re-attached remote video (periodic check)");
                 
-                // Verify it worked
-                setTimeout(() => {
+                // Verify it worked - check multiple times
+                let verifyAttempts = 0;
+                const verifyInterval = setInterval(() => {
+                  verifyAttempts++;
                   const newVideoElement = mainVideoRef.current?.querySelector('video') as HTMLVideoElement;
-                  if (newVideoElement && !newVideoElement.paused) {
+                  const isNowPlaying = newVideoElement && 
+                                      !newVideoElement.paused && 
+                                      newVideoElement.readyState >= 2 &&
+                                      newVideoElement.videoWidth > 0 && 
+                                      newVideoElement.videoHeight > 0;
+                  
+                  if (isNowPlaying) {
                     setRemoteVideoActive(true);
-                    console.log("✅ Remote video verified playing");
+                    console.log("✅ Remote video verified playing (periodic check)");
+                    clearInterval(verifyInterval);
+                  } else if (verifyAttempts >= 5) {
+                    // Try to force play if it's not working
+                    if (newVideoElement) {
+                      newVideoElement.play().catch(() => {
+                        console.warn("Could not play video element");
+                      });
+                    }
+                    clearInterval(verifyInterval);
                   }
-                }, 300);
+                }, 200);
               } catch (e: any) {
                 console.error("❌ Error re-attaching remote video:", e?.message);
               }
@@ -792,6 +980,7 @@ export default function SessionPage() {
     // Handle game.started event with full game data
     ws.on("game.started", (data: { gameId: string; gameType: string; state: any; players: any[] }) => {
       console.log("Game started with state:", data);
+      console.log("Game type:", data.gameType, "Game ID:", data.gameId);
       setGameType(data.gameType);
       setGameId(data.gameId);
       setGameState(data.state);
@@ -825,55 +1014,13 @@ export default function SessionPage() {
       }, 5000);
     });
 
-    // Trivia events
-    ws.on("trivia.countdown", (data: { secondsRemaining: number }) => {
-      setGameState((prev: any) => ({
-        ...prev,
-        phase: 'countdown',
-        timeRemaining: data.secondsRemaining
-      }));
-    });
-
-    ws.on("trivia.question", (data: { questionNumber: number; totalQuestions: number; question: string; answers: string[]; category: string; difficulty: string; timeLimit: number }) => {
-      setGameState((prev: any) => ({
-        ...prev,
-        phase: 'question',
-        timeRemaining: data.timeLimit,
-        questionStartedAt: Date.now()
-      }));
-    });
-
-    ws.on("trivia.tick", (data: { timeRemaining: number }) => {
-      setGameState((prev: any) => ({
-        ...prev,
-        timeRemaining: data.timeRemaining
-      }));
-    });
-
-    ws.on("trivia.questionResult", (data: { correctAnswer: string; correctAnswerIndex: number; results: any[]; scores: any[] }) => {
-      setGameState((prev: any) => ({
-        ...prev,
-        phase: 'reveal',
-        currentAnswers: data.results,
-        players: data.scores
-      }));
-    });
-
-    ws.on("trivia.gameEnd", (data: { finalScores: any[]; winnerId: string | null; winnerIds: string[]; isDraw: boolean }) => {
-      setGameState((prev: any) => ({
-        ...prev,
-        phase: 'finished',
-        isFinished: true,
-        players: data.finalScores,
-        winnerId: data.winnerId,
-        winnerIds: data.winnerIds
-      }));
-      setTimeout(() => {
-        setGameType(null);
-        setGameId(null);
-        setGameState(null);
-        setGamePlayers([]);
-      }, 10000);
+    // Handle game cancellation (when other user exits)
+    ws.on("game.cancelled", (data: { gameId: string }) => {
+      console.log("Game cancelled by other user:", data);
+      setGameType(null);
+      setGameId(null);
+      setGameState(null);
+      setGamePlayers([]);
     });
 
     ws.on("session.end", (data: any) => {
@@ -928,7 +1075,32 @@ export default function SessionPage() {
     }
   };
 
+  const handleCancelGame = () => {
+    // Reset game state to allow starting a new game
+    console.log("Cancelling game, resetting state");
+    setGameType(null);
+    setGameId(null);
+    setGameState(null);
+    setGamePlayers([]);
+    
+    // Optionally emit a cancel event to the server
+    if (socket) {
+      socket.emit("session.cancelGame", { sessionId });
+    }
+    
+    console.log("Game cancelled");
+  };
+
   const handleEndSession = async () => {
+    // Prevent ending session during an active game
+    if (gameType === "trivia" && gameState) {
+      const triviaPhase = gameState.phase;
+      if (triviaPhase && triviaPhase !== "gameEnd" && triviaPhase !== "themeSelection") {
+        alert("Cannot end session while trivia game is in progress! Please finish the game first.");
+        return;
+      }
+    }
+
     // Cleanup Agora
     if (localTrackRef.current) {
       localTrackRef.current.videoTrack?.stop();
@@ -1063,9 +1235,23 @@ export default function SessionPage() {
       )}
 
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm uppercase tracking-[0.25em] text-gray-400">Session</p>
-          <h1 className="text-3xl font-semibold text-white">Video Call</h1>
+        <div className="flex items-center gap-3">
+          <BackButton 
+            href="/play" 
+            label="← Back" 
+            disabled={
+              gameType === "trivia" && 
+              gameState && 
+              gameState.phase && 
+              gameState.phase !== "gameEnd" && 
+              gameState.phase !== "themeSelection"
+            }
+            disabledMessage="Cannot exit while trivia game is in progress!"
+          />
+          <div>
+            <p className="text-sm uppercase tracking-[0.25em] text-gray-400">Session</p>
+            <h1 className="text-3xl font-semibold text-white">Video Call</h1>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           {/* Wallet Balance Display */}
@@ -1078,7 +1264,31 @@ export default function SessionPage() {
           </div>
           <button
             onClick={handleEndSession}
-            className="bg-gray-800 px-4 py-2 font-semibold text-white border-2 border-white/30 hover:bg-gray-700"
+            disabled={
+              gameType === "trivia" && 
+              gameState && 
+              gameState.phase && 
+              gameState.phase !== "gameEnd" && 
+              gameState.phase !== "themeSelection"
+            }
+            className={`bg-gray-800 px-4 py-2 font-semibold text-white border-2 border-white/30 ${
+              gameType === "trivia" && 
+              gameState && 
+              gameState.phase && 
+              gameState.phase !== "gameEnd" && 
+              gameState.phase !== "themeSelection"
+                ? "opacity-50 cursor-not-allowed"
+                : "hover:bg-gray-700"
+            }`}
+            title={
+              gameType === "trivia" && 
+              gameState && 
+              gameState.phase && 
+              gameState.phase !== "gameEnd" && 
+              gameState.phase !== "themeSelection"
+                ? "Cannot end session while trivia game is in progress!"
+                : ""
+            }
           >
             End Session
           </button>
@@ -1233,6 +1443,17 @@ export default function SessionPage() {
           </div>
 
           {/* Game Section - Always visible alongside video */}
+          {gameType && gameId && (
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-white">Playing: {gameType}</h2>
+              <button
+                onClick={handleCancelGame}
+                className="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 text-white border border-white/30"
+              >
+                Exit Game
+              </button>
+            </div>
+          )}
           {gameType && gameId && gameType === "TICTACTOE" ? (
             <TicTacToeGame
               gameId={gameId}
@@ -1251,6 +1472,23 @@ export default function SessionPage() {
                 }, 5000); // 5 second delay before allowing new game
               }}
             />
+          ) : gameType && gameId && gameType === "TRIVIA" ? (
+            <TriviaGame
+              gameId={gameId}
+              socket={socket!}
+              odUserId={userId}
+              initialState={gameState || undefined}
+              initialPlayers={gamePlayers}
+              onGameEnd={(result) => {
+                console.log("Trivia game ended:", result);
+                setTimeout(() => {
+                  setGameType(null);
+                  setGameId(null);
+                  setGameState(null);
+                  setGamePlayers([]);
+                }, 5000);
+              }}
+            />
           ) : gameType && gameId && gameType === "CHESS" && gameState ? (
             <ChessGame
               gameState={gameState}
@@ -1266,31 +1504,75 @@ export default function SessionPage() {
                 }
               }}
             />
-          ) : gameType && gameId && gameType === "TRIVIA" && gameState ? (
-            <TriviaGame
-              gameState={gameState}
+          ) : gameType && gameId && (gameType === "TRUTHS_AND_LIE" || gameType?.toUpperCase() === "TRUTHS_AND_LIE" || gameType?.includes("TRUTH")) ? (
+            <TruthsAndLieGame
+              gameId={gameId}
+              socket={socket!}
               odUserId={userId}
-              socket={socket}
-              onAnswer={(questionIndex, answerIndex) => {
-                if (socket) {
-                  socket.emit("trivia.answer", { gameId, questionIndex, answerIndex });
-                }
+              initialState={gameState || undefined}
+              initialPlayers={gamePlayers}
+              onGameEnd={(result) => {
+                console.log("Truths and Lie game ended:", result);
+                setTimeout(() => {
+                  setGameType(null);
+                  setGameId(null);
+                  setGameState(null);
+                  setGamePlayers([]);
+                }, 5000);
               }}
             />
-          ) : gameType ? (
+          ) : gameType && gameId && (gameType === "BILLIARDS" || gameType?.toUpperCase() === "BILLIARDS") ? (
+            <BilliardsGameV2
+              gameId={gameId}
+              socket={socket!}
+              odUserId={userId}
+              initialState={gameState || undefined}
+              initialPlayers={gamePlayers}
+              onGameEnd={(result) => {
+                console.log("Billiards game ended:", result);
+                setTimeout(() => {
+                  setGameType(null);
+                  setGameId(null);
+                  setGameState(null);
+                  setGamePlayers([]);
+                }, 5000);
+              }}
+            />
+          ) : gameType && !gameId ? (
+            // Game is pending/starting - show cancel option
             <div className="bg-gray-800 p-4 border border-white/20">
-              <p className="text-sm text-gray-300 mb-2">Active game: {gameType}</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm text-gray-300">Starting game: {gameType}</p>
+                <button
+                  onClick={handleCancelGame}
+                  className="text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 text-white border border-white/30"
+                >
+                  Cancel
+                </button>
+              </div>
+              <div className="bg-black p-8 text-center text-gray-400 min-h-[200px] flex items-center justify-center">
+                <div>
+                  <p className="text-lg mb-2">Starting {gameType}...</p>
+                  <p className="text-xs">Please wait while the game initializes</p>
+                </div>
+              </div>
+            </div>
+          ) : gameType && gameId && gameType !== "TICTACTOE" && gameType !== "TRIVIA" && gameType !== "CHESS" && gameType !== "TRUTHS_AND_LIE" && gameType?.toUpperCase() !== "TRUTHS_AND_LIE" && gameType !== "BILLIARDS" && gameType?.toUpperCase() !== "BILLIARDS" ? (
+            <div className="bg-gray-800 p-4 border border-white/20">
+              <p className="text-sm text-gray-300 mb-2">Active game: {gameType} (ID: {gameId})</p>
               <div className="bg-black p-8 text-center text-gray-400 min-h-[200px] flex items-center justify-center">
                 <div>
                   <p className="text-lg mb-2">Game UI for {gameType}</p>
-                  <p className="text-xs">Game implementation coming soon</p>
+                  <p className="text-xs">Game implementation coming soon or state not loaded</p>
+                  <p className="text-xs mt-2">Game State: {gameState ? "Loaded" : "Not loaded"}</p>
+                  <p className="text-xs mt-1">Debug: gameType={gameType}, gameId={gameId}</p>
                 </div>
               </div>
             </div>
           ) : (
             <div className="bg-gray-800 p-4 border border-white/20">
               <p className="text-sm text-gray-400 mb-3">Start a game</p>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => handleStartGame("CHESS")}
                   className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
@@ -1308,6 +1590,22 @@ export default function SessionPage() {
                   className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
                 >
                   Tic-Tac-Toe
+                </button>
+                <button
+                  key="truths-and-lie-button"
+                  onClick={() => {
+                    console.log("Starting Truths & Lie game");
+                    handleStartGame("TRUTHS_AND_LIE");
+                  }}
+                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                >
+                  Truths & Lie
+                </button>
+                <button
+                  onClick={() => handleStartGame("BILLIARDS")}
+                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                >
+                  Billiards
                 </button>
               </div>
             </div>

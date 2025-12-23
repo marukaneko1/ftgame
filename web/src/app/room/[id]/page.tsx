@@ -7,7 +7,6 @@ import { roomsApi, walletApi } from "@/lib/api";
 import BackButton from "@/components/BackButton";
 import TicTacToeGame from "@/components/games/TicTacToeGame";
 import ChessGame from "@/components/games/ChessGame";
-import TriviaGame from "@/components/games/TriviaGame";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://localhost:3001";
 
@@ -199,71 +198,20 @@ export default function RoomPage() {
       setVoteResults(data.results);
     });
 
-    ws.on("room.gameStarting", (data: { roundId: string; gameType: string; gameId?: string; gameState?: any; players?: any[] }) => {
+    ws.on("room.gameStarting", (data: { roundId: string; gameType: string }) => {
       if (votingTimerRef.current) clearInterval(votingTimerRef.current);
-      // Initialize game state if provided
-      if (data.gameState) {
-        setGameState(data.gameState);
-      }
-      setGameEnded(false);
-      setGameResult(null);
       setRoom((prev) => {
         if (!prev?.currentRound) return prev;
         return {
           ...prev,
           status: "IN_GAME",
-          currentRound: { ...prev.currentRound, status: "IN_GAME", gameType: data.gameType, gameId: data.gameId || null }
+          currentRound: { ...prev.currentRound, status: "IN_GAME", gameType: data.gameType }
         };
       });
     });
 
     ws.on("room.gameStateUpdate", (data: { roundId: string; state: any; lastMove?: any }) => {
       setGameState(data.state);
-    });
-
-    // Trivia events for rooms
-    ws.on("trivia.countdown", (data: { secondsRemaining: number }) => {
-      setGameState((prev: any) => ({
-        ...prev,
-        phase: 'countdown',
-        timeRemaining: data.secondsRemaining
-      }));
-    });
-
-    ws.on("trivia.question", (data: { questionNumber: number; totalQuestions: number; question: string; answers: string[]; category: string; difficulty: string; timeLimit: number }) => {
-      setGameState((prev: any) => ({
-        ...prev,
-        phase: 'question',
-        timeRemaining: data.timeLimit,
-        questionStartedAt: Date.now()
-      }));
-    });
-
-    ws.on("trivia.tick", (data: { timeRemaining: number }) => {
-      setGameState((prev: any) => ({
-        ...prev,
-        timeRemaining: data.timeRemaining
-      }));
-    });
-
-    ws.on("trivia.questionResult", (data: { correctAnswer: string; correctAnswerIndex: number; results: any[]; scores: any[] }) => {
-      setGameState((prev: any) => ({
-        ...prev,
-        phase: 'reveal',
-        currentAnswers: data.results,
-        players: data.scores
-      }));
-    });
-
-    ws.on("trivia.gameEnd", (data: { finalScores: any[]; winnerId: string | null; winnerIds: string[]; isDraw: boolean }) => {
-      setGameState((prev: any) => ({
-        ...prev,
-        phase: 'finished',
-        isFinished: true,
-        players: data.finalScores,
-        winnerId: data.winnerId,
-        winnerIds: data.winnerIds
-      }));
     });
 
     ws.on("room.roundEnded", (data: {
@@ -556,31 +504,6 @@ export default function RoomPage() {
                           socket.emit("room.gameForfeit", {
                             roomId: room.id,
                             roundId: currentRound.id
-                          });
-                        }
-                      }}
-                    />
-                  ) : (
-                    <p className="text-gray-400">Loading game...</p>
-                  )}
-                </div>
-              )}
-
-              {/* In Game - Trivia */}
-              {currentRound.status === "IN_GAME" && currentRound.gameType === "TRIVIA" && (
-                <div>
-                  {gameState ? (
-                    <TriviaGame
-                      gameState={gameState}
-                      odUserId={userId}
-                      socket={socket}
-                      onAnswer={(questionIndex, answerIndex) => {
-                        if (socket && currentRound) {
-                          socket.emit("trivia.answer", {
-                            gameId: currentRound.gameId,
-                            roundId: currentRound.id,
-                            questionIndex,
-                            answerIndex
                           });
                         }
                       }}

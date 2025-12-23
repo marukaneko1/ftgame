@@ -16,7 +16,7 @@ export default function LandingPage() {
         <h1 className="mt-4 text-4xl font-semibold leading-tight text-white">
           18+ verified social play with video, games, and safe tokens.
         </h1>
-        <p className="mt-4 text-lg text-gray-300">
+        <p className="mt-4 text-lg text-gray-300" style={{ overflow: 'visible' }}>
           Match with verified adults across the United States. Play quick games, send gifts with tokens
           (no cash-out), and join moderated public rooms.
         </p>
