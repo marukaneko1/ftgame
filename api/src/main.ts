@@ -1,12 +1,29 @@
 import { Logger, ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import * as cookieParser from "cookie-parser";
-import { raw } from "express";
+import { raw, Request, Response, NextFunction } from "express";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix("api");
+  
+  // SECURITY: Add security headers
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    // Prevent clickjacking
+    res.setHeader('X-Frame-Options', 'DENY');
+    // Prevent MIME sniffing
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    // XSS Protection (legacy browsers)
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    // Referrer policy
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    // Content Security Policy (adjust based on your needs)
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'");
+    // Permissions Policy
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    next();
+  });
   
   // Enable CORS for frontend - support multiple origins
   const allowedOrigins = process.env.ALLOWED_ORIGINS
@@ -15,10 +32,20 @@ async function bootstrap() {
   
   app.enableCors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) return callback(null, true);
+      // SECURITY: Only allow no-origin requests in development (for testing tools)
+      // In production, require an origin header to prevent CSRF-like attacks
+      if (!origin) {
+        const isDev = process.env.NODE_ENV === "development";
+        return callback(null, isDev);
+      }
       
-      if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === "development") {
+      // In development, allow localhost variations
+      const isDev = process.env.NODE_ENV === "development";
+      if (isDev && (origin.includes("localhost") || origin.includes("127.0.0.1"))) {
+        return callback(null, true);
+      }
+      
+      if (allowedOrigins.indexOf(origin) !== -1) {
         callback(null, true);
       } else {
         callback(new Error("Not allowed by CORS"));
@@ -30,9 +57,17 @@ async function bootstrap() {
   });
   
   app.use(cookieParser());
+  
+  // SECURITY: Limit JSON body size (10KB for most endpoints, prevents DoS)
+  // Note: NestJS/Express default is 100KB, we're being more restrictive
+  const express = require('express');
+  app.use(express.json({ limit: '10kb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+  
   // Stripe requires the raw body for signature verification on webhook endpoints.
-  app.use("/api/subscriptions/webhook", raw({ type: "application/json" }));
-  app.use("/api/wallet/stripe/webhook", raw({ type: "application/json" }));
+  // Allow larger size (1MB) for webhooks as they may contain large payloads
+  app.use("/api/subscriptions/webhook", raw({ type: "application/json", limit: '1mb' }));
+  app.use("/api/wallet/stripe/webhook", raw({ type: "application/json", limit: '1mb' }));
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

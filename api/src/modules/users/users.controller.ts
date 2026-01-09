@@ -1,17 +1,23 @@
 import { Body, Controller, Get, Patch, UseGuards } from "@nestjs/common";
-import { IsNumber, IsNotEmpty } from "class-validator";
+import { IsNumber, IsNotEmpty, Min, Max } from "class-validator";
 import { UsersService } from "./users.service";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { JwtPayload } from "@omegle-game/shared/src/types/auth";
 
 class UpdateLocationDto {
+  // SECURITY: Validate latitude is within valid range (-90 to 90)
   @IsNumber()
   @IsNotEmpty()
+  @Min(-90, { message: 'Latitude must be between -90 and 90' })
+  @Max(90, { message: 'Latitude must be between -90 and 90' })
   latitude!: number;
 
+  // SECURITY: Validate longitude is within valid range (-180 to 180)
   @IsNumber()
   @IsNotEmpty()
+  @Min(-180, { message: 'Longitude must be between -180 and 180' })
+  @Max(180, { message: 'Longitude must be between -180 and 180' })
   longitude!: number;
 }
 

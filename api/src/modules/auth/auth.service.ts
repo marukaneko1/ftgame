@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Injectable, UnauthorizedException, Logger } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RegisterDto } from "./dto/register.dto";
 import { LoginDto } from "./dto/login.dto";
@@ -11,9 +11,33 @@ import { OAuth2Client } from "google-auth-library";
 import { v4 as uuidv4 } from "uuid";
 import { JwtPayload } from "@omegle-game/shared/src/types/auth";
 
+/**
+ * SECURITY: Account lockout configuration
+ */
+interface LoginAttempt {
+  count: number;
+  lastAttempt: number;
+  lockedUntil?: number;
+}
+
+// SECURITY: Constants for account lockout
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+const ATTEMPT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+// SECURITY: Constants for refresh token brute force protection
+const MAX_REFRESH_ATTEMPTS = 10;
+const REFRESH_LOCKOUT_MS = 60 * 60 * 1000; // 1 hour
+
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private googleClient: OAuth2Client | null = null;
+  
+  // SECURITY: In-memory tracking for failed attempts
+  // For production, use Redis for distributed tracking
+  private loginAttempts = new Map<string, LoginAttempt>();
+  private refreshAttempts = new Map<string, LoginAttempt>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -23,6 +47,78 @@ export class AuthService {
     const clientId = this.configService.get<string>("google.clientId");
     if (clientId) {
       this.googleClient = new OAuth2Client(clientId);
+    }
+    
+    // Cleanup old entries every 30 minutes
+    setInterval(() => this.cleanupAttempts(), 30 * 60 * 1000);
+  }
+  
+  /**
+   * SECURITY: Check if account is locked out
+   */
+  private checkLockout(key: string, attemptsMap: Map<string, LoginAttempt>, maxAttempts: number, lockoutMs: number): void {
+    const attempt = attemptsMap.get(key);
+    if (!attempt) return;
+    
+    const now = Date.now();
+    
+    // Check if currently locked
+    if (attempt.lockedUntil && now < attempt.lockedUntil) {
+      const remainingMs = attempt.lockedUntil - now;
+      const remainingMins = Math.ceil(remainingMs / 60000);
+      throw new UnauthorizedException(`Account locked. Try again in ${remainingMins} minutes.`);
+    }
+    
+    // Reset if window has passed
+    if (now - attempt.lastAttempt > ATTEMPT_WINDOW_MS) {
+      attemptsMap.delete(key);
+    }
+  }
+  
+  /**
+   * SECURITY: Record a failed attempt
+   */
+  private recordFailedAttempt(key: string, attemptsMap: Map<string, LoginAttempt>, maxAttempts: number, lockoutMs: number): void {
+    const now = Date.now();
+    const attempt = attemptsMap.get(key) || { count: 0, lastAttempt: now };
+    
+    // Reset if window has passed
+    if (now - attempt.lastAttempt > ATTEMPT_WINDOW_MS) {
+      attempt.count = 0;
+    }
+    
+    attempt.count++;
+    attempt.lastAttempt = now;
+    
+    if (attempt.count >= maxAttempts) {
+      attempt.lockedUntil = now + lockoutMs;
+      this.logger.warn(`Account locked for key: ${key.substring(0, 8)}... after ${attempt.count} failed attempts`);
+    }
+    
+    attemptsMap.set(key, attempt);
+  }
+  
+  /**
+   * SECURITY: Clear failed attempts on successful action
+   */
+  private clearAttempts(key: string, attemptsMap: Map<string, LoginAttempt>): void {
+    attemptsMap.delete(key);
+  }
+  
+  /**
+   * Cleanup old attempt entries
+   */
+  private cleanupAttempts(): void {
+    const now = Date.now();
+    for (const [key, attempt] of this.loginAttempts.entries()) {
+      if (now - attempt.lastAttempt > ATTEMPT_WINDOW_MS * 2) {
+        this.loginAttempts.delete(key);
+      }
+    }
+    for (const [key, attempt] of this.refreshAttempts.entries()) {
+      if (now - attempt.lastAttempt > REFRESH_LOCKOUT_MS * 2) {
+        this.refreshAttempts.delete(key);
+      }
     }
   }
 
@@ -59,14 +155,26 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
+    // SECURITY: Check for account lockout before attempting login
+    this.checkLockout(dto.email.toLowerCase(), this.loginAttempts, MAX_LOGIN_ATTEMPTS, LOCKOUT_DURATION_MS);
+    
     const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (!user || !user.passwordHash) {
+      // SECURITY: Record failed attempt even if user doesn't exist (timing attack protection)
+      this.recordFailedAttempt(dto.email.toLowerCase(), this.loginAttempts, MAX_LOGIN_ATTEMPTS, LOCKOUT_DURATION_MS);
       throw new UnauthorizedException("Invalid credentials");
     }
+    
     const valid = await argon2.verify(user.passwordHash, dto.password);
     if (!valid) {
+      // SECURITY: Record failed attempt
+      this.recordFailedAttempt(dto.email.toLowerCase(), this.loginAttempts, MAX_LOGIN_ATTEMPTS, LOCKOUT_DURATION_MS);
       throw new UnauthorizedException("Invalid credentials");
     }
+    
+    // SECURITY: Clear failed attempts on successful login
+    this.clearAttempts(dto.email.toLowerCase(), this.loginAttempts);
+    
     this.assertNotBanned(user);
     await this.ensureWalletAndSubscription(user.id);
     return this.issueTokens(user);
@@ -115,11 +223,15 @@ export class AuthService {
     return this.issueTokens(user);
   }
 
-  async refresh(dto: RefreshDto, refreshTokenFromCookie?: string) {
+  async refresh(dto: RefreshDto, refreshTokenFromCookie?: string, clientIp?: string) {
     const raw = dto.refreshToken || refreshTokenFromCookie;
     if (!raw) {
       throw new UnauthorizedException("Missing refresh token");
     }
+    
+    // SECURITY: Use IP-based rate limiting for refresh token brute force protection
+    const rateLimitKey = clientIp || 'unknown';
+    this.checkLockout(rateLimitKey, this.refreshAttempts, MAX_REFRESH_ATTEMPTS, REFRESH_LOCKOUT_MS);
     
     // Find the matching token by checking all recent tokens
     // Note: We check all tokens because we can't identify the user until we verify the hash
@@ -132,8 +244,13 @@ export class AuthService {
     
     const matched = await this.findMatchingRefreshToken(allRecentTokens, raw);
     if (!matched) {
+      // SECURITY: Record failed refresh attempt
+      this.recordFailedAttempt(rateLimitKey, this.refreshAttempts, MAX_REFRESH_ATTEMPTS, REFRESH_LOCKOUT_MS);
       throw new UnauthorizedException("Invalid refresh token");
     }
+    
+    // SECURITY: Clear failed attempts on successful refresh
+    this.clearAttempts(rateLimitKey, this.refreshAttempts);
     
     // Fetch user and check ban status before proceeding
     const user = await this.prisma.user.findUnique({ 

@@ -3,6 +3,8 @@ import {
   Controller,
   Get,
   HttpCode,
+  HttpException,
+  HttpStatus,
   Post,
   Req,
   Res,
@@ -14,6 +16,7 @@ import { LoginDto } from "./dto/login.dto";
 import { GoogleLoginDto } from "./dto/google-login.dto";
 import { RefreshDto } from "./dto/refresh.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
+import { RateLimitGuard } from "../../common/guards/rate-limit.guard";
 import { Request, Response } from "express";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { JwtPayload } from "@omegle-game/shared/src/types/auth";
@@ -23,6 +26,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post("register")
+  @UseGuards(RateLimitGuard)
   async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
     const tokens = await this.authService.register(dto);
     this.setRefreshCookie(res, tokens.refreshToken);
@@ -31,6 +35,7 @@ export class AuthController {
 
   @Post("login")
   @HttpCode(200)
+  @UseGuards(RateLimitGuard)
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     const tokens = await this.authService.login(dto);
     this.setRefreshCookie(res, tokens.refreshToken);
@@ -38,6 +43,7 @@ export class AuthController {
   }
 
   @Post("google")
+  @UseGuards(RateLimitGuard)
   async google(@Body() dto: GoogleLoginDto, @Res({ passthrough: true }) res: Response) {
     const tokens = await this.authService.googleLogin(dto);
     this.setRefreshCookie(res, tokens.refreshToken);
@@ -45,8 +51,11 @@ export class AuthController {
   }
 
   @Post("refresh")
+  @UseGuards(RateLimitGuard)
   async refresh(@Body() dto: RefreshDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const tokens = await this.authService.refresh(dto, req.cookies?.refresh_token as string);
+    // SECURITY: Pass client IP for brute force protection
+    const clientIp = req.ip || req.headers['x-forwarded-for']?.toString()?.split(',')[0]?.trim() || 'unknown';
+    const tokens = await this.authService.refresh(dto, req.cookies?.refresh_token as string, clientIp);
     if (tokens.refreshToken) {
       this.setRefreshCookie(res, tokens.refreshToken);
     }

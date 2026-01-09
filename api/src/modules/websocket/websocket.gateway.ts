@@ -20,6 +20,7 @@ import { ChessService } from "../games/chess/chess.service";
 import { TriviaService } from "../games/trivia/trivia.service";
 import { TruthsAndLieService } from "../games/truths-and-lie/truths-and-lie.service";
 import { BilliardsService } from "../games/billiards/billiards.service";
+import { PokerService } from "../games/poker/poker.service";
 import { VideoService } from "../video/video.service";
 import { WalletService } from "../wallet/wallet.service";
 import { ReportsService } from "../reports/reports.service";
@@ -27,11 +28,54 @@ import { RoomsService } from "../rooms/rooms.service";
 import { v4 as uuidv4 } from "uuid";
 import { GameType, RoundStatus } from "@prisma/client";
 import { Position, PieceType } from "../games/chess/chess.types";
-import { MatchJoinDto, SendGiftDto, GameMoveDto, RoomJoinDto, RoomVoteDto } from "./dto";
+import { 
+  MatchJoinDto, 
+  SendGiftDto, 
+  GameMoveDto, 
+  RoomJoinDto, 
+  RoomVoteDto,
+  PokerActionDto,
+  PokerNewHandDto,
+  BilliardsShotDto,
+  BilliardsPlaceCueBallDto,
+  BilliardsEventDto,
+  TriviaSelectThemeDto,
+  TriviaAnswerDto,
+  TruthsAndLieSubmitStatementsDto,
+  TruthsAndLieSubmitGuessDto
+} from "./dto";
 
+// SECURITY: Dynamic CORS based on environment - DO NOT use origin: "*" in production
 @WebSocketGateway({
   namespace: "/ws",
-  cors: { origin: "*", credentials: true }
+  cors: {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      // Allow requests with no origin in development only (for testing tools)
+      if (!origin) {
+        const isDev = process.env.NODE_ENV === "development";
+        return callback(null, isDev);
+      }
+      
+      // Get allowed origins from environment
+      const allowedOrigins = process.env.ALLOWED_ORIGINS
+        ? process.env.ALLOWED_ORIGINS.split(",").map(o => o.trim())
+        : [process.env.WEB_BASE_URL || "http://localhost:3000"];
+      
+      // In development, allow localhost variations
+      const isDev = process.env.NODE_ENV === "development";
+      if (isDev && (origin.includes("localhost") || origin.includes("127.0.0.1"))) {
+        return callback(null, true);
+      }
+      
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      
+      callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true
+  },
+  maxHttpBufferSize: 1e6 // SECURITY: Limit WebSocket message size to 1MB
 })
 export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
   @WebSocketServer()
@@ -52,6 +96,7 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
     private readonly triviaService: TriviaService,
     private readonly truthsAndLieService: TruthsAndLieService,
     private readonly billiardsService: BilliardsService,
+    private readonly pokerService: PokerService,
     private readonly videoService: VideoService,
     private readonly walletService: WalletService,
     private readonly reportsService: ReportsService,
@@ -62,6 +107,17 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
   handleConnection(client: Socket) {
     // WsJwtGuard will attach user payload to client in message handlers.
     client.emit("connected", { ok: true });
+  }
+
+  /**
+   * SECURITY: Helper to verify user is a player in the game
+   * Throws an error if user is not authorized
+   */
+  private assertPlayerInGame(game: any, userId: string): void {
+    const isPlayer = game.players.some((p: any) => p.userId === userId);
+    if (!isPlayer) {
+      throw new Error("You are not a player in this game");
+    }
   }
 
   handleDisconnect(client: Socket) {
@@ -331,6 +387,12 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
         if (billiardsState) {
           finalState = billiardsState as any;
         }
+      } else if (startedGame.type === GameType.POKER && finalState) {
+        // Ensure poker state is properly set
+        const pokerState = this.pokerService.getState(startedGame.id);
+        if (pokerState) {
+          finalState = pokerState as any;
+        }
       }
       
       // Emit game started event with full game data
@@ -433,6 +495,9 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
     
     try {
       const game = await this.gamesService.getGame(body.gameId);
+      
+      // SECURITY: Verify user is a player in this game
+      this.assertPlayerInGame(game, user.sub);
       
       // Handle different game types
       if (game.type === GameType.TICTACTOE) {
@@ -1193,10 +1258,16 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
   }
 
   @UseGuards(WsJwtGuard)
+  @UsePipes(new ValidationPipe({ 
+    whitelist: true, 
+    forbidNonWhitelisted: true,
+    transform: true,
+    exceptionFactory: (errors) => new WsException(errors)
+  }))
   @SubscribeMessage("trivia.selectTheme")
   async handleTriviaThemeSelection(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { gameId: string; theme: string }
+    @MessageBody() body: TriviaSelectThemeDto
   ) {
     const user = (client as any).user;
 
@@ -1206,6 +1277,9 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
         client.emit("game.error", { message: "Not a trivia game" });
         return;
       }
+
+      // SECURITY: Verify user is a player in this game
+      this.assertPlayerInGame(game, user.sub);
 
       // Select theme
       const result = this.triviaService.selectTheme(
@@ -1265,10 +1339,16 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
   }
 
   @UseGuards(WsJwtGuard)
+  @UsePipes(new ValidationPipe({ 
+    whitelist: true, 
+    forbidNonWhitelisted: true,
+    transform: true,
+    exceptionFactory: (errors) => new WsException(errors)
+  }))
   @SubscribeMessage("trivia.answer")
   async handleTriviaAnswer(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { gameId: string; questionIndex: number; answerIndex: number }
+    @MessageBody() body: TriviaAnswerDto
   ) {
     const user = (client as any).user;
 
@@ -1278,6 +1358,9 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
         client.emit("game.error", { message: "Not a trivia game" });
         return;
       }
+
+      // SECURITY: Verify user is a player in this game
+      this.assertPlayerInGame(game, user.sub);
 
       // Get user display name
       const userRecord = await (this.gamesService as any).prisma.user.findUnique({
@@ -1301,13 +1384,13 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
       let result;
       try {
         result = this.triviaService.submitAnswer(
-          body.gameId,
-          user.sub,
-          displayName,
-          body.questionIndex,
-          body.answerIndex,
-          timeToAnswer
-        );
+        body.gameId,
+        user.sub,
+        displayName,
+        body.questionIndex,
+        body.answerIndex,
+        timeToAnswer
+      );
       } catch (error: any) {
         this.logger.error(`Answer submission error for game ${body.gameId}:`, error);
         client.emit("game.error", { message: error.message || "Failed to submit answer" });
@@ -1351,10 +1434,16 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
   // ==================== TRUTHS AND LIE GAME ====================
 
   @UseGuards(WsJwtGuard)
+  @UsePipes(new ValidationPipe({ 
+    whitelist: true, 
+    forbidNonWhitelisted: true,
+    transform: true,
+    exceptionFactory: (errors) => new WsException(errors)
+  }))
   @SubscribeMessage("truthsAndLie.submitStatements")
   async handleSubmitStatements(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { gameId: string; statements: string[]; lieIndex: number }
+    @MessageBody() body: TruthsAndLieSubmitStatementsDto
   ) {
     const user = (client as any).user;
 
@@ -1364,6 +1453,9 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
         client.emit("game.error", { message: "Not a truths and lie game" });
         return;
       }
+
+      // SECURITY: Verify user is a player in this game
+      this.assertPlayerInGame(game, user.sub);
 
       const result = this.truthsAndLieService.submitStatements(
         body.gameId,
@@ -1412,10 +1504,16 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
   }
 
   @UseGuards(WsJwtGuard)
+  @UsePipes(new ValidationPipe({ 
+    whitelist: true, 
+    forbidNonWhitelisted: true,
+    transform: true,
+    exceptionFactory: (errors) => new WsException(errors)
+  }))
   @SubscribeMessage("truthsAndLie.submitGuess")
   async handleSubmitGuess(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { gameId: string; selectedIndex: number }
+    @MessageBody() body: TruthsAndLieSubmitGuessDto
   ) {
     const user = (client as any).user;
 
@@ -1425,6 +1523,9 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
         client.emit("game.error", { message: "Not a truths and lie game" });
         return;
       }
+
+      // SECURITY: Verify user is a player in this game
+      this.assertPlayerInGame(game, user.sub);
 
       const result = this.truthsAndLieService.submitGuess(
         body.gameId,
@@ -1537,10 +1638,16 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
   // ==================== BILLIARDS GAME ====================
 
   @UseGuards(WsJwtGuard)
+  @UsePipes(new ValidationPipe({ 
+    whitelist: true, 
+    forbidNonWhitelisted: true,
+    transform: true,
+    exceptionFactory: (errors) => new WsException(errors)
+  }))
   @SubscribeMessage("billiards.shot")
   async handleBilliardsShot(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { gameId: string; power: number; angle: number }
+    @MessageBody() body: BilliardsShotDto
   ) {
     const user = (client as any).user;
 
@@ -1550,6 +1657,9 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
         client.emit("game.error", { message: "Not a billiards game" });
         return;
       }
+
+      // SECURITY: Verify user is a player in this game
+      this.assertPlayerInGame(game, user.sub);
 
       // Execute shot
       const result = this.billiardsService.executeShot(
@@ -1601,14 +1711,20 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
   }
 
   @UseGuards(WsJwtGuard)
+  @UsePipes(new ValidationPipe({ 
+    whitelist: true, 
+    forbidNonWhitelisted: true,
+    transform: true,
+    exceptionFactory: (errors) => new WsException(errors)
+  }))
   @SubscribeMessage("billiards.event")
   async handleBilliardsEvent(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { gameId: string; event: any }
+    @MessageBody() data: BilliardsEventDto
   ) {
     try {
-      const userId = (client as any).user?.id;
-      if (!userId) {
+      const user = (client as any).user;
+      if (!user?.sub) {
         client.emit("game.error", { message: "Unauthorized" });
         return;
       }
@@ -1624,6 +1740,9 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
         return;
       }
 
+      // SECURITY: Verify user is a player in this game
+      this.assertPlayerInGame(game, user.sub);
+
       // Relay event to other players in the session
       const roomKey = `session:${game.sessionId}`;
       client.to(roomKey).emit("billiards.event", {
@@ -1636,10 +1755,17 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
     }
   }
 
+  @UseGuards(WsJwtGuard)
+  @UsePipes(new ValidationPipe({ 
+    whitelist: true, 
+    forbidNonWhitelisted: true,
+    transform: true,
+    exceptionFactory: (errors) => new WsException(errors)
+  }))
   @SubscribeMessage("billiards.placeCueBall")
   async handlePlaceCueBall(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { gameId: string; position: { x: number; y: number } }
+    @MessageBody() body: BilliardsPlaceCueBallDto
   ) {
     const user = (client as any).user;
 
@@ -1649,6 +1775,9 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
         client.emit("game.error", { message: "Not a billiards game" });
         return;
       }
+
+      // SECURITY: Verify user is a player in this game
+      this.assertPlayerInGame(game, user.sub);
 
       // Place cue ball
       const result = this.billiardsService.placeCueBall(
@@ -1680,6 +1809,234 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
     } catch (error: any) {
       this.logger.error("Place cue ball error:", error);
       client.emit("game.error", { message: error.message || "Failed to place cue ball" });
+    }
+  }
+
+  @UseGuards(WsJwtGuard)
+  @UsePipes(new ValidationPipe({ 
+    whitelist: true, 
+    forbidNonWhitelisted: true,
+    transform: true,
+    exceptionFactory: (errors) => new WsException(errors)
+  }))
+  @SubscribeMessage("poker.action")
+  async handlePokerAction(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: PokerActionDto
+  ) {
+    const user = (client as any).user;
+
+    try {
+      const game = await this.gamesService.getGame(body.gameId);
+      if (game.type !== GameType.POKER) {
+        client.emit("game.error", { message: "Not a poker game" });
+        return;
+      }
+
+      // SECURITY: Verify user is a player in this game
+      this.assertPlayerInGame(game, user.sub);
+
+      // Process poker action
+      const result = await this.pokerService.processAction(
+        body.gameId,
+        user.sub,
+        body.action as any,
+        body.amount
+      );
+
+      if (!result.success) {
+        client.emit("game.error", { message: result.error || "Failed to process action" });
+        return;
+      }
+
+      // Get session ID from game
+      const sessionId = game.sessionId;
+      const roomKey = sessionId ? `session:${sessionId}` : `game:${body.gameId}`;
+
+      // Log detailed state before saving
+      this.logger.log(`[handlePokerAction] ===== ACTION RESULT =====`);
+      this.logger.log(`[handlePokerAction] Game: ${body.gameId}`);
+      this.logger.log(`[handlePokerAction] Action: ${body.action} (amount: ${body.amount})`);
+      this.logger.log(`[handlePokerAction] Result state: currentPlayerIndex=${result.state?.currentPlayerIndex}, round=${result.state?.currentBettingRound}, pot=${result.state?.pot}`);
+      this.logger.log(`[handlePokerAction] Players: ${result.state?.players?.map((p: any, i: number) => `[${i}] ${p.userId.slice(-6)} (${p.status}, chips=${p.chips}, bet=${p.betThisRound})`).join(' | ')}`);
+      this.logger.log(`[handlePokerAction] Next to act: ${result.nextAction?.currentPlayerId?.slice(-6)}`);
+
+      // Update state in database
+      await (this.gamesService as any).prisma.game.update({
+        where: { id: body.gameId },
+        data: { state: result.state as any }
+      });
+      
+      // Ensure the in-memory state is also updated
+      if (result.state) {
+        this.pokerService.setState(body.gameId, result.state);
+      }
+
+      // Emit action result to all players (contains full state, so no need for separate stateUpdate)
+      this.logger.log(`[handlePokerAction] Emitting to room: ${roomKey}`);
+      this.server.to(roomKey).emit("poker.actionResult", {
+        gameId: body.gameId,
+        action: body.action,
+        amount: body.amount,
+        state: result.state,
+        handComplete: result.handComplete,
+        winners: result.winners,
+        nextAction: result.nextAction
+      });
+
+      // Note: Removed duplicate game.stateUpdate emission - poker.actionResult already contains full state
+      // This prevents double state updates on the frontend
+
+      // If hand completed, emit hand end event
+      if (result.handComplete) {
+        this.server.to(roomKey).emit("poker.handEnd", {
+          gameId: body.gameId,
+          winners: result.winners,
+          state: result.state
+        });
+      }
+    } catch (error: any) {
+      this.logger.error("Poker action error:", error);
+      client.emit("game.error", { message: error.message || "Failed to process poker action" });
+    }
+  }
+
+  @UseGuards(WsJwtGuard)
+  @UsePipes(new ValidationPipe({ 
+    whitelist: true, 
+    forbidNonWhitelisted: true,
+    transform: true,
+    exceptionFactory: (errors) => new WsException(errors)
+  }))
+  @SubscribeMessage("poker.startNewHand")
+  async handlePokerStartNewHand(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: PokerNewHandDto
+  ) {
+    const user = (client as any).user;
+
+    try {
+      const game = await this.gamesService.getGame(body.gameId);
+      if (game.type !== GameType.POKER) {
+        client.emit("game.error", { message: "Not a poker game" });
+        return;
+      }
+
+      // Check if user is a player in the game
+      const isPlayer = game.players.some(p => p.userId === user.sub);
+      if (!isPlayer) {
+        client.emit("game.error", { message: "You are not a player in this game" });
+        return;
+      }
+
+      // Start new hand
+      const newState = this.pokerService.startNewHand(body.gameId);
+      if (!newState) {
+        client.emit("game.error", { message: "Failed to start new hand" });
+        return;
+      }
+
+      // Get session ID from game
+      const sessionId = game.sessionId;
+      const roomKey = sessionId ? `session:${sessionId}` : `game:${body.gameId}`;
+
+      // Check if game is over (one player has all chips)
+      const playersWithChips = newState.players.filter(p => p.chips > 0);
+      if (playersWithChips.length < 2) {
+        // Game is over - mark as completed
+        await (this.gamesService as any).prisma.game.update({
+          where: { id: body.gameId },
+          data: { 
+            state: newState as any,
+            status: "COMPLETED",
+            endedAt: new Date(),
+            winnerUserId: newState.winnerIds?.[0] || playersWithChips[0]?.userId || null
+          }
+        });
+
+        // Emit game over
+        this.server.to(roomKey).emit("poker.gameOver", {
+          gameId: body.gameId,
+          winnerId: newState.winnerIds?.[0] || playersWithChips[0]?.userId,
+          state: newState
+        });
+
+        this.server.to(roomKey).emit("game.end", {
+          gameId: body.gameId,
+          winnerId: newState.winnerIds?.[0] || playersWithChips[0]?.userId,
+          reason: "all_chips_won"
+        });
+
+        // Cleanup game from memory after a delay
+        setTimeout(() => {
+          this.pokerService.cleanupGame(body.gameId);
+        }, 60000); // Keep in memory for 1 minute for any late reconnects
+
+        return;
+      }
+
+      // Update state in database
+      await (this.gamesService as any).prisma.game.update({
+        where: { id: body.gameId },
+        data: { state: newState as any }
+      });
+
+      // Emit new hand started to all players
+      this.server.to(roomKey).emit("poker.newHand", {
+        gameId: body.gameId,
+        state: newState
+      });
+
+      // Emit state update
+      this.server.to(roomKey).emit("game.stateUpdate", {
+        gameId: body.gameId,
+        state: newState
+      });
+    } catch (error: any) {
+      this.logger.error("Poker start new hand error:", error);
+      client.emit("game.error", { message: error.message || "Failed to start new hand" });
+    }
+  }
+
+  @UseGuards(WsJwtGuard)
+  @SubscribeMessage("poker.endGame")
+  async handlePokerEndGame(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { gameId: string }
+  ) {
+    const user = (client as any).user;
+
+    try {
+      const game = await this.gamesService.getGame(body.gameId);
+      if (game.type !== GameType.POKER) {
+        client.emit("game.error", { message: "Not a poker game" });
+        return;
+      }
+
+      // Cleanup game from memory
+      this.pokerService.cleanupGame(body.gameId);
+
+      // Update game status in database
+      await (this.gamesService as any).prisma.game.update({
+        where: { id: body.gameId },
+        data: { 
+          status: "COMPLETED",
+          endedAt: new Date()
+        }
+      });
+
+      const sessionId = game.sessionId;
+      const roomKey = sessionId ? `session:${sessionId}` : `game:${body.gameId}`;
+
+      this.server.to(roomKey).emit("game.end", {
+        gameId: body.gameId,
+        reason: "game_ended"
+      });
+
+      this.logger.log(`Poker game ${body.gameId} ended by user ${user.sub}`);
+    } catch (error: any) {
+      this.logger.error("Poker end game error:", error);
+      client.emit("game.error", { message: error.message || "Failed to end game" });
     }
   }
 }

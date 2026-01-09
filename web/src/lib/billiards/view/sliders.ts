@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SECURITY: Use textContent instead of innerHTML to prevent XSS
 import {
   R,
   e,
@@ -70,8 +71,11 @@ export class Sliders {
     }
   }
 
-  showValue(element, value) {
+  showValue(element: string, value: number) {
     const label = document.querySelector(`label[for=${element}]`)
-    label && (label.innerHTML = `${element}=${value}`)
+    if (label) {
+      // SECURITY: Use textContent instead of innerHTML to prevent XSS
+      label.textContent = `${element}=${value}`
+    }
   }
 }
