@@ -33,11 +33,13 @@ async function createApp(): Promise<express.Express> {
     // NestJS with setGlobalPrefix('api') expects routes without /api prefix
     // So we strip /api from the path before NestJS sees it
     expressApp.use((req: Request, res: Response, next: NextFunction) => {
-      if (req.path && req.path.startsWith('/api/')) {
-        // Strip /api prefix from path
+      // req.path is read-only, so we manipulate req.url instead
+      // Express will derive path from url automatically
+      if (req.url && req.url.startsWith('/api/')) {
+        // Strip /api prefix from URL - Express will update path automatically
         req.url = req.url.replace(/^\/api/, '');
-        (req as any).path = req.path.replace(/^\/api/, '');
-        if (req.originalUrl) {
+        // Also update originalUrl if needed
+        if (req.originalUrl && req.originalUrl.startsWith('/api/')) {
           (req as any).originalUrl = req.originalUrl.replace(/^\/api/, '');
         }
       }
