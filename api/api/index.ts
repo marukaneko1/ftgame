@@ -19,26 +19,24 @@ async function createApp(): Promise<express.Express> {
 
   try {
     const expressApp = express();
-    const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
     
-    // Strip /api prefix from incoming requests
+    // CRITICAL: Strip /api prefix BEFORE creating NestJS app
     // Vercel rewrite sends /api/auth/login to this function as /api/auth/login
-    // NestJS with setGlobalPrefix('api') will look for /api/api/auth/login
-    // So we need to strip /api before NestJS processes the request
+    // NestJS with setGlobalPrefix('api') expects routes without /api prefix
+    // So we strip /api from the path before NestJS sees it
     expressApp.use((req: Request, res: Response, next: NextFunction) => {
       if (req.path && req.path.startsWith('/api/')) {
-        const newPath = req.path.replace(/^\/api/, '');
-        const newUrl = req.url.replace(/^\/api/, '');
-        // Mutate request object to strip /api prefix
-        Object.defineProperty(req, 'path', { value: newPath, configurable: true, writable: true });
-        Object.defineProperty(req, 'url', { value: newUrl, configurable: true, writable: true });
+        // Strip /api prefix from path
+        req.url = req.url.replace(/^\/api/, '');
+        (req as any).path = req.path.replace(/^\/api/, '');
         if (req.originalUrl) {
-          Object.defineProperty(req, 'originalUrl', { value: req.originalUrl.replace(/^\/api/, ''), configurable: true, writable: true });
+          (req as any).originalUrl = req.originalUrl.replace(/^\/api/, '');
         }
       }
       next();
     });
     
+    const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
     app.setGlobalPrefix('api');
   
   // Add security headers
