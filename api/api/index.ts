@@ -28,26 +28,37 @@ async function createApp(): Promise<express.Express> {
       next();
     });
     
-    // CRITICAL: Strip /api prefix BEFORE creating NestJS app
+    const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
+    
+    // CRITICAL: Strip /api prefix AFTER NestJS app creation
+    // When using ExpressAdapter, NestJS registers routes on the expressApp
+    // Middleware runs before route matching, so we can strip /api here
     // Vercel rewrite sends /api/auth/login to this function as /api/auth/login
-    // NestJS controllers are defined as @Controller('auth'), which creates routes at /auth
-    // We strip /api from incoming /api/auth/register to make it /auth/register
-    // So: incoming /api/auth/register -> middleware strips to /auth/register -> matches @Controller('auth') @Post('register')
+    // Controllers are @Controller('auth') which creates /auth routes (no global prefix)
+    // We strip /api from incoming /api/auth/register -> /auth/register -> matches route
     expressApp.use((req: Request, res: Response, next: NextFunction) => {
+      // Log for debugging
+      if (process.env.VERCEL_ENV === 'development') {
+        console.log(`[Path Debug] Original URL: ${req.url}, Path: ${req.path}`);
+      }
+      
       // req.path is read-only, so we manipulate req.url instead
       // Express will derive path from url automatically
       if (req.url && req.url.startsWith('/api/')) {
         // Strip /api prefix from URL - Express will update path automatically
-        req.url = req.url.replace(/^\/api/, '');
+        const newUrl = req.url.replace(/^\/api/, '');
+        req.url = newUrl;
         // Also update originalUrl if needed
         if (req.originalUrl && req.originalUrl.startsWith('/api/')) {
           (req as any).originalUrl = req.originalUrl.replace(/^\/api/, '');
         }
+        
+        if (process.env.VERCEL_ENV === 'development') {
+          console.log(`[Path Debug] Stripped to: ${req.url}`);
+        }
       }
       next();
     });
-    
-    const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
     
     // DON'T set global prefix for serverless - controllers are at /auth
     // Incoming: /api/auth/register -> middleware strips to /auth/register -> matches @Controller('auth') @Post('register')
