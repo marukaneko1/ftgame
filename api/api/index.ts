@@ -29,29 +29,50 @@ async function createApp(): Promise<express.Express> {
     next();
   });
 
-  // CORS configuration
+  // CORS configuration - must allow Vercel frontend domains
   const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
     : [process.env.WEB_BASE_URL || 'http://localhost:3000'];
+  
+  // Add common Vercel patterns to allowed origins
+  const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
+  if (isVercel) {
+    // Allow any vercel.app subdomain in production (be more restrictive in production)
+    // In production, you should set ALLOWED_ORIGINS explicitly
+  }
 
   app.enableCors({
     origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, Postman, etc.) in development only
       if (!origin) {
         const isDev = process.env.NODE_ENV === 'development';
         return callback(null, isDev);
       }
+      
+      // In development, allow localhost
       const isDev = process.env.NODE_ENV === 'development';
       if (isDev && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
         return callback(null, true);
       }
+      
+      // Check if origin is in allowed list
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
+      
+      // In production on Vercel, allow vercel.app subdomains (for flexibility)
+      // You should set ALLOWED_ORIGINS explicitly for better security
+      if (origin.includes('.vercel.app')) {
+        return callback(null, true);
+      }
+      
       callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['Content-Type'],
+    maxAge: 86400, // 24 hours
   });
 
   expressApp.use(cookieParser());
@@ -72,6 +93,31 @@ async function createApp(): Promise<express.Express> {
 }
 
 export default async function handler(req: Request, res: Response) {
+  // SECURITY: Handle CORS preflight requests explicitly (must be before NestJS app)
+  if (req.method === 'OPTIONS') {
+    const allowedOrigins = process.env.ALLOWED_ORIGINS
+      ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+      : [process.env.WEB_BASE_URL || 'http://localhost:3000'];
+    
+    const origin = req.headers.origin || '';
+    const isDev = process.env.NODE_ENV === 'development';
+    const isAllowed = allowedOrigins.includes(origin) || 
+                     origin.includes('.vercel.app') ||
+                     (isDev && (origin.includes('localhost') || origin.includes('127.0.0.1')));
+    
+    if (origin && isAllowed) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Max-Age', '86400');
+      return res.status(200).end();
+    }
+    
+    // If origin not allowed, still return 200 but without CORS headers
+    return res.status(200).end();
+  }
+
   const app = await createApp();
   return app(req, res);
 }
