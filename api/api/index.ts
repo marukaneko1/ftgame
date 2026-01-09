@@ -14,8 +14,26 @@ async function createApp(): Promise<express.Express> {
   }
 
   const expressApp = express();
-  const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
   
+  // Vercel rewrite sends all requests to this function, preserving the original path
+  // So /api/auth/login arrives as /api/auth/login
+  // NestJS with setGlobalPrefix('api') expects /api/auth/login
+  // We need to strip the leading /api if present to avoid double prefix
+  expressApp.use((req: Request, res: Response, next: NextFunction) => {
+    // If path starts with /api, strip it since NestJS will add it back
+    if (req.path.startsWith('/api/')) {
+      const newPath = req.path.replace(/^\/api/, '');
+      req.url = req.url.replace(/^\/api/, '');
+      req.path = newPath;
+      // Also update the originalUrl if needed
+      if (req.originalUrl?.startsWith('/api/')) {
+        (req as any).originalUrl = req.originalUrl.replace(/^\/api/, '');
+      }
+    }
+    next();
+  });
+  
+  const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
   app.setGlobalPrefix('api');
   
   // Add security headers
