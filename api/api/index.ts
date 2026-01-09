@@ -28,16 +28,11 @@ async function createApp(): Promise<express.Express> {
       next();
     });
     
-    const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
-    
-    // DON'T set global prefix - we'll handle /api in the path stripping middleware
-    // Controllers are defined as @Controller('auth'), which will create routes at /auth
+    // CRITICAL: Strip /api prefix BEFORE creating NestJS app
+    // Vercel rewrite sends /api/auth/login to this function as /api/auth/login
+    // NestJS controllers are defined as @Controller('auth'), which creates routes at /auth
     // We strip /api from incoming /api/auth/register to make it /auth/register
     // So: incoming /api/auth/register -> middleware strips to /auth/register -> matches @Controller('auth') @Post('register')
-    
-    // CRITICAL: Strip /api prefix - this must happen AFTER NestJS app creation
-    // but the middleware will be called on every request
-    // NestJS registers routes at /auth (no prefix), incoming requests are /api/auth, we strip to /auth
     expressApp.use((req: Request, res: Response, next: NextFunction) => {
       // req.path is read-only, so we manipulate req.url instead
       // Express will derive path from url automatically
@@ -52,7 +47,11 @@ async function createApp(): Promise<express.Express> {
       next();
     });
     
-    // NO global prefix - controllers are at /auth, incoming is /api/auth, we strip to /auth
+    const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
+    
+    // DON'T set global prefix for serverless - controllers are at /auth
+    // Incoming: /api/auth/register -> middleware strips to /auth/register -> matches @Controller('auth') @Post('register')
+    // app.setGlobalPrefix('api'); // REMOVED - we strip /api prefix in middleware instead
   
   // Add security headers
   expressApp.use((req: Request, res: Response, next: NextFunction) => {
