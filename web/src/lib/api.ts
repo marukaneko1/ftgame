@@ -1,5 +1,9 @@
 import axios from "axios";
 
+// API URL configuration
+// Set NEXT_PUBLIC_API_URL in Vercel environment variables to your backend API URL
+// Example: https://ftgame-api-xxx.vercel.app
+// For local development, defaults to localhost:3001
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 export const api = axios.create({

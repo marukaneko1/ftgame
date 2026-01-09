@@ -16,7 +16,7 @@ export class WalletService {
   constructor(private readonly prisma: PrismaService, private readonly configService: ConfigService) {
     const secretKey = this.configService.get<string>("stripe.secretKey");
     if (secretKey) {
-      this.stripe = new Stripe(secretKey);
+    this.stripe = new Stripe(secretKey);
     }
     // Stripe is optional for local development
   }

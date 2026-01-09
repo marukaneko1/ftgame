@@ -191,12 +191,12 @@ export default function TriviaGame({
         setShowWinnerAnimation(true);
         
         if (onGameEnd) {
-          onGameEnd({
-            winnerId: data.winnerId,
+        onGameEnd({
+          winnerId: data.winnerId,
             winnerName,
-            isDraw: data.isDraw,
-            finalScores: data.finalScores
-          });
+          isDraw: data.isDraw,
+          finalScores: data.finalScores
+        });
         }
         setGameState((prev) => {
           if (!prev) return prev;
@@ -485,31 +485,31 @@ export default function TriviaGame({
         {/* Final Scores */}
         <div className={showWinnerAnimation ? "opacity-30" : ""}>
           <h2 className="text-2xl font-bold text-white mb-4 text-center">Game Over!</h2>
-          <div className="space-y-4">
+        <div className="space-y-4">
             <div className="text-center mb-6">
-              {isDraw ? (
-                <p className="text-xl text-yellow-400">It's a tie!</p>
-              ) : (
+            {isDraw ? (
+              <p className="text-xl text-yellow-400">It's a tie!</p>
+            ) : (
                 <div className="flex items-center justify-center gap-3">
                   <span className="text-4xl">🏆</span>
-                  <p className="text-xl text-green-400">
-                    {winner.displayName} wins with {winner.score} points!
-                  </p>
+              <p className="text-xl text-green-400">
+                {winner.displayName} wins with {winner.score} points!
+              </p>
                 </div>
-              )}
-            </div>
-            <div className="space-y-2">
+            )}
+          </div>
+          <div className="space-y-2">
               {gameState.players.map((player) => {
                 const isPlayerWinner = player.odUserId === winner.odUserId && !isDraw;
                 return (
-                  <div
-                    key={player.odUserId}
+              <div
+                key={player.odUserId}
                     className={`p-4 rounded flex items-center justify-between ${
                       isPlayerWinner
                         ? "bg-green-900/30 border-2 border-green-500"
                         : "bg-gray-800 border border-gray-700"
-                    }`}
-                  >
+                }`}
+              >
                     <div className="flex items-center gap-3">
                       {isPlayerWinner && <span className="text-2xl">🏆</span>}
                       <span className={`text-lg font-semibold ${isPlayerWinner ? "text-green-400" : "text-white"}`}>
@@ -519,10 +519,10 @@ export default function TriviaGame({
                     <span className={`text-lg font-bold ${isPlayerWinner ? "text-green-400" : "text-gray-300"}`}>
                       {player.score} points
                     </span>
-                  </div>
+                </div>
                 );
               })}
-            </div>
+              </div>
           </div>
         </div>
       </div>

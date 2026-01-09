@@ -4,17 +4,20 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { io, Socket } from "socket.io-client";
 import AgoraRTC, { ICameraVideoTrack, IMicrophoneAudioTrack, IAgoraRTCClient, IAgoraRTCRemoteUser, NetworkQuality } from "agora-rtc-sdk-ng";
-import { videoApi, usersApi, walletApi } from "@/lib/api";
+import { api, videoApi, usersApi, walletApi } from "@/lib/api";
 import TicTacToeGame from "@/components/games/TicTacToeGame";
 import ChessGame from "@/components/games/ChessGame";
 import TriviaGame from "@/components/games/TriviaGame";
 import TruthsAndLieGame from "@/components/games/TruthsAndLieGame";
 import BilliardsGame from "@/components/games/BilliardsGame";
 import BilliardsGameV2 from "@/components/games/BilliardsGameV2";
+import PokerGame from "@/components/games/PokerGame";
 import BackButton from "@/components/BackButton";
 
 // Configurable WebSocket URL
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://localhost:3001";
+import { getWebSocketUrl } from "@/lib/ws-config";
+
+const WS_URL = getWebSocketUrl();
 
 interface SessionData {
   sessionId: string;
@@ -90,6 +93,9 @@ export default function SessionPage() {
   const remoteVideoActiveRef = useRef(false);
   const localVideoActiveRef = useRef(false);
   
+  // Ref to track current gameId for socket event handlers (avoids stale closure issues)
+  const gameIdRef = useRef<string | null>(null);
+  
   const [userId, setUserId] = useState<string>("");
 
   // Keep refs in sync with state (fixes stale closure issue in intervals)
@@ -100,6 +106,11 @@ export default function SessionPage() {
   useEffect(() => {
     localVideoActiveRef.current = localVideoActive;
   }, [localVideoActive]);
+
+  // Keep gameIdRef in sync with gameId state for socket handlers
+  useEffect(() => {
+    gameIdRef.current = gameId;
+  }, [gameId]);
 
   // Audio mute/unmute toggle
   const toggleMute = useCallback(() => {
@@ -289,14 +300,14 @@ export default function SessionPage() {
             try {
               // Subscribe to both video and audio (handle errors gracefully if one isn't available)
               try {
-                await client.subscribe(remoteUser, "video");
+              await client.subscribe(remoteUser, "video");
                 console.log("✅ Subscribed to existing remote user video");
               } catch (videoError: any) {
                 console.log("ℹ️ Video not available for existing user:", videoError?.message || "Unknown error");
               }
               
               try {
-                await client.subscribe(remoteUser, "audio");
+              await client.subscribe(remoteUser, "audio");
                 console.log("✅ Subscribed to existing remote user audio");
               } catch (audioError: any) {
                 console.log("ℹ️ Audio not available for existing user:", audioError?.message || "Unknown error");
@@ -912,20 +923,50 @@ export default function SessionPage() {
   }, [sessionData, userId, sessionId]);
 
   useEffect(() => {
-    const token = localStorage.getItem("accessToken");
+    let token: string | null = localStorage.getItem("accessToken");
     if (!token) {
       router.push("/auth/login");
       return;
     }
 
-    // Connect to WebSocket (using configurable URL)
-    const ws = io(`${WS_URL}/ws`, {
-      auth: { token },
-      transports: ["websocket"]
-    });
+    // Try to refresh token before connecting (in case it's expired)
+    const refreshToken = async () => {
+      try {
+        const refreshResponse = await api.post("/auth/refresh", {});
+        if (refreshResponse.data?.accessToken) {
+          token = refreshResponse.data.accessToken as string;
+          localStorage.setItem("accessToken", token);
+          console.log("[SessionPage] Token refreshed before WebSocket connection");
+        }
+      } catch (refreshError: any) {
+        if (refreshError.response?.status === 401 || refreshError.response?.status === 403) {
+          console.error("[SessionPage] Token refresh failed, user may need to log in again");
+          router.push("/auth/login");
+          return;
+        }
+        console.warn("[SessionPage] Token refresh failed (non-critical), using existing token");
+      }
+    };
 
-    // Track if we've already joined the session
-    let hasJoinedSession = false;
+    // Refresh token and then connect
+    refreshToken().then(() => {
+      if (!token) {
+        router.push("/auth/login");
+        return;
+      }
+
+      // Connect to WebSocket (using configurable URL)
+      // Allow fallback to polling if websocket fails
+      const ws = io(`${WS_URL}/ws`, {
+        auth: { token },
+        transports: ["websocket", "polling"], // Allow fallback to polling
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
+      });
+
+      // Track if we've already joined the session
+      let hasJoinedSession = false;
     
     ws.on("connect", () => {
       console.log("WebSocket connected");
@@ -968,6 +1009,7 @@ export default function SessionPage() {
       setGameType(data.gameType);
       if (data.gameId) {
         setGameId(data.gameId);
+        gameIdRef.current = data.gameId;
       }
     });
 
@@ -975,6 +1017,7 @@ export default function SessionPage() {
       console.log("Game created:", data);
       setGameType(data.gameType);
       setGameId(data.gameId);
+      gameIdRef.current = data.gameId;
     });
 
     // Handle game.started event with full game data
@@ -983,14 +1026,74 @@ export default function SessionPage() {
       console.log("Game type:", data.gameType, "Game ID:", data.gameId);
       setGameType(data.gameType);
       setGameId(data.gameId);
+      // Also update ref immediately to avoid race conditions with other socket events
+      gameIdRef.current = data.gameId;
       setGameState(data.state);
       setGamePlayers(data.players);
     });
 
-    // Handle game state updates (for chess and other games)
-    ws.on("game.stateUpdate", (data: { gameId: string; state: any; lastMove?: any }) => {
-      console.log("Game state updated:", data);
-      setGameState(data.state);
+          // Handle game state updates (for chess and other games)
+          ws.on("game.stateUpdate", (data: { gameId: string; state: any; lastMove?: any }) => {
+            console.log("Game state updated:", data);
+            // Use ref to avoid stale closure - gameIdRef.current always has latest value
+            if (data.gameId === gameIdRef.current) {
+              console.log("[SessionPage] Setting game state from game.stateUpdate:", data.state);
+              setGameState(data.state);
+            }
+          });
+
+          // Poker-specific event handlers
+          ws.on("poker.actionResult", (data: { gameId: string; state: any; handComplete?: boolean; winners?: any[]; nextAction?: any }) => {
+            console.log("[SessionPage] ===== POKER ACTION RESULT =====");
+            console.log("[SessionPage] Received poker.actionResult for game:", data.gameId);
+            console.log("[SessionPage] Current gameIdRef:", gameIdRef.current);
+            console.log("[SessionPage] My userId:", userId?.slice(-6));
+            
+            // Use ref to avoid stale closure - gameIdRef.current always has latest value
+            if (data.gameId === gameIdRef.current) {
+              console.log("[SessionPage] Current player index in new state:", data.state?.currentPlayerIndex);
+              const nextPlayer = data.state?.players?.[data.state?.currentPlayerIndex];
+              console.log("[SessionPage] Next player to act:", nextPlayer?.userId?.slice(-6), "(status:", nextPlayer?.status, ")");
+              console.log("[SessionPage] Is it my turn?:", nextPlayer?.userId === userId);
+              console.log("[SessionPage] Players:", data.state?.players?.map((p: any, i: number) => 
+                `[${i}] ${p.userId.slice(-6)} (${p.status}, bet=${p.betThisRound})`
+              ).join(' | '));
+              console.log("[SessionPage] Hand complete?:", data.handComplete);
+              console.log("[SessionPage] Next action from server:", data.nextAction);
+              
+              // Always update state - React will handle re-rendering efficiently
+              setGameState(data.state);
+              console.log("[SessionPage] State updated");
+            } else {
+              console.log("[SessionPage] Ignoring - different game ID (expected:", gameIdRef.current, ")");
+            }
+          });
+
+          // Handle game errors (including poker action errors)
+          ws.on("game.error", (data: { message: string }) => {
+            console.error("[SessionPage] Game error:", data.message);
+            // Don't show alert for "Not your turn" - it's likely a race condition
+            if (data.message && !data.message.includes("Not your turn")) {
+              alert(`Game Error: ${data.message}`);
+            } else {
+              console.warn("[SessionPage] Suppressing 'Not your turn' error - likely race condition");
+            }
+          });
+
+    ws.on("poker.handEnd", (data: { gameId: string; winners: any[]; state: any }) => {
+      console.log("Poker hand ended:", data);
+      // Use ref to avoid stale closure
+      if (data.gameId === gameIdRef.current) {
+        setGameState(data.state);
+      }
+    });
+
+    ws.on("poker.newHand", (data: { gameId: string; state: any }) => {
+      console.log("Poker new hand started:", data);
+      // Use ref to avoid stale closure
+      if (data.gameId === gameIdRef.current) {
+        setGameState(data.state);
+      }
     });
 
     // Handle game end
@@ -1024,7 +1127,6 @@ export default function SessionPage() {
     });
 
     ws.on("session.end", (data: any) => {
-      alert("Session ended");
       router.push("/play");
     });
 
@@ -1062,11 +1164,15 @@ export default function SessionPage() {
       }
     });
 
-    setSocket(ws);
+      setSocket(ws);
 
-    return () => {
-      ws.disconnect();
-    };
+      return () => {
+        ws.disconnect();
+      };
+    }).catch((error) => {
+      console.error("Failed to refresh token or connect:", error);
+      setError("Failed to connect. Please try again.");
+    });
   }, [sessionId, router]);
 
   const handleStartGame = (type: string) => {
@@ -1538,6 +1644,28 @@ export default function SessionPage() {
                 }, 5000);
               }}
             />
+          ) : gameType && gameId && (gameType === "POKER" || gameType?.toUpperCase() === "POKER") ? (
+            <PokerGame
+              gameState={gameState}
+              odUserId={userId}
+              onAction={(action, amount) => {
+                if (socket && socket.connected) {
+                  console.log("[SessionPage] Emitting poker.action:", { gameId, action, amount });
+                  console.log("[SessionPage] Current gameState before emit:", {
+                    currentPlayerIndex: gameState?.currentPlayerIndex,
+                    players: gameState?.players?.map((p: any, i: number) => `[${i}] ${p.userId.slice(-6)} (${p.status})`).join(' | ')
+                  });
+                  socket.emit("poker.action", { gameId, action, amount });
+                } else {
+                  alert("Connection lost. Please refresh the page.");
+                }
+              }}
+              onStartNewHand={() => {
+                if (socket) {
+                  socket.emit("poker.startNewHand", { gameId });
+                }
+              }}
+            />
           ) : gameType && !gameId ? (
             // Game is pending/starting - show cancel option
             <div className="bg-gray-800 p-4 border border-white/20">
@@ -1557,7 +1685,7 @@ export default function SessionPage() {
                 </div>
               </div>
             </div>
-          ) : gameType && gameId && gameType !== "TICTACTOE" && gameType !== "TRIVIA" && gameType !== "CHESS" && gameType !== "TRUTHS_AND_LIE" && gameType?.toUpperCase() !== "TRUTHS_AND_LIE" && gameType !== "BILLIARDS" && gameType?.toUpperCase() !== "BILLIARDS" ? (
+          ) : gameType && gameId && gameType !== "TICTACTOE" && gameType !== "TRIVIA" && gameType !== "CHESS" && gameType !== "TRUTHS_AND_LIE" && gameType?.toUpperCase() !== "TRUTHS_AND_LIE" && gameType !== "BILLIARDS" && gameType?.toUpperCase() !== "BILLIARDS" && gameType !== "POKER" && gameType?.toUpperCase() !== "POKER" ? (
             <div className="bg-gray-800 p-4 border border-white/20">
               <p className="text-sm text-gray-300 mb-2">Active game: {gameType} (ID: {gameId})</p>
               <div className="bg-black p-8 text-center text-gray-400 min-h-[200px] flex items-center justify-center">
@@ -1606,6 +1734,12 @@ export default function SessionPage() {
                   className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
                 >
                   Billiards
+                </button>
+                <button
+                  onClick={() => handleStartGame("POKER")}
+                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                >
+                  Poker
                 </button>
               </div>
             </div>

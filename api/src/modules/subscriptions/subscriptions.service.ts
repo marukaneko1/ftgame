@@ -12,7 +12,7 @@ export class SubscriptionsService {
   constructor(private readonly prisma: PrismaService, private readonly configService: ConfigService) {
     const secretKey = this.configService.get<string>("stripe.secretKey");
     if (secretKey) {
-      this.stripe = new Stripe(secretKey);
+    this.stripe = new Stripe(secretKey);
     } else {
       this.logger.warn("STRIPE_SECRET_KEY not configured - Stripe features will be disabled");
     }

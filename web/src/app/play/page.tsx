@@ -6,8 +6,10 @@ import { io, Socket } from "socket.io-client";
 import { api } from "@/lib/api";
 import BackButton from "@/components/BackButton";
 
+import { getWebSocketUrl } from "@/lib/ws-config";
+
 // Configurable WebSocket URL
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://localhost:3001";
+const WS_URL = getWebSocketUrl();
 
 // Matching timeout (2 minutes)
 const MATCH_TIMEOUT_MS = 2 * 60 * 1000;

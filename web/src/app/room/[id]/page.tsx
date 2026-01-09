@@ -8,7 +8,9 @@ import BackButton from "@/components/BackButton";
 import TicTacToeGame from "@/components/games/TicTacToeGame";
 import ChessGame from "@/components/games/ChessGame";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://localhost:3001";
+import { getWebSocketUrl } from "@/lib/ws-config";
+
+const WS_URL = getWebSocketUrl();
 
 const GAME_TYPES = [
   { value: "TICTACTOE", label: "🎯 Tic Tac Toe", icon: "🎯" },
