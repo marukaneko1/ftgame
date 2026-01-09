@@ -1,10 +1,14 @@
 import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
+// Conditionally import AppModule - for serverless, we need a version without WebSocket
 import { AppModule } from '../dist/app.module';
 import express, { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
 import { raw } from 'express';
 import { ValidationPipe } from '@nestjs/common';
+
+// Mark as serverless environment
+process.env.IS_SERVERLESS = 'true';
 
 let cachedApp: express.Express;
 
@@ -13,25 +17,28 @@ async function createApp(): Promise<express.Express> {
     return cachedApp;
   }
 
-  const expressApp = express();
-  const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
-  
-  // Vercel rewrite sends all requests to this function, preserving the original path
-  // When request comes to /api/auth/login, it arrives as /api/auth/login
-  // NestJS with setGlobalPrefix('api') will look for /api/api/auth/login
-  // So we need to strip the leading /api from the path before NestJS processes it
-  expressApp.use((req: Request, res: Response, next: NextFunction) => {
-    // If path starts with /api/, strip the /api prefix since NestJS will add it back
-    if (req.path.startsWith('/api/')) {
-      const newPath = req.path.replace(/^\/api/, '');
-      // Update both path and url
-      Object.defineProperty(req, 'path', { value: newPath, writable: true });
-      Object.defineProperty(req, 'url', { value: req.url.replace(/^\/api/, ''), writable: true });
-    }
-    next();
-  });
-  
-  app.setGlobalPrefix('api');
+  try {
+    const expressApp = express();
+    
+    // CRITICAL: Strip /api prefix BEFORE creating NestJS app
+    // Vercel rewrite sends /api/auth/login to this function as /api/auth/login
+    // NestJS with setGlobalPrefix('api') expects /auth/login
+    expressApp.use((req: Request, res: Response, next: NextFunction) => {
+      if (req.path && req.path.startsWith('/api/')) {
+        const newPath = req.path.replace(/^\/api/, '');
+        const newUrl = req.url.replace(/^\/api/, '');
+        // Directly mutate the request object
+        (req as any).path = newPath;
+        (req as any).url = newUrl;
+        if (req.originalUrl) {
+          (req as any).originalUrl = req.originalUrl.replace(/^\/api/, '');
+        }
+      }
+      next();
+    });
+    
+    const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
+    app.setGlobalPrefix('api');
   
   // Add security headers
   expressApp.use((req: Request, res: Response, next: NextFunction) => {
@@ -102,38 +109,51 @@ async function createApp(): Promise<express.Express> {
     }),
   );
 
-  await app.init();
-  cachedApp = expressApp;
-  return cachedApp;
+    await app.init();
+    cachedApp = expressApp;
+    return cachedApp;
+  } catch (error) {
+    console.error('Failed to create NestJS app:', error);
+    throw error;
+  }
 }
 
 export default async function handler(req: Request, res: Response) {
-  // SECURITY: Handle CORS preflight requests explicitly (must be before NestJS app)
-  if (req.method === 'OPTIONS') {
-    const allowedOrigins = process.env.ALLOWED_ORIGINS
-      ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-      : [process.env.WEB_BASE_URL || 'http://localhost:3000'];
-    
-    const origin = req.headers.origin || '';
-    const isDev = process.env.NODE_ENV === 'development';
-    const isAllowed = allowedOrigins.includes(origin) || 
-                     origin.includes('.vercel.app') ||
-                     (isDev && (origin.includes('localhost') || origin.includes('127.0.0.1')));
-    
-    if (origin && isAllowed) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Max-Age', '86400');
+  try {
+    // SECURITY: Handle CORS preflight requests explicitly (must be before NestJS app)
+    if (req.method === 'OPTIONS') {
+      const allowedOrigins = process.env.ALLOWED_ORIGINS
+        ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+        : [process.env.WEB_BASE_URL || 'http://localhost:3000'];
+      
+      const origin = req.headers.origin || '';
+      const isDev = process.env.NODE_ENV === 'development';
+      const isAllowed = allowedOrigins.includes(origin) || 
+                       origin.includes('.vercel.app') ||
+                       (isDev && (origin.includes('localhost') || origin.includes('127.0.0.1')));
+      
+      if (origin && isAllowed) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Max-Age', '86400');
+        return res.status(200).end();
+      }
+      
+      // If origin not allowed, still return 200 but without CORS headers
       return res.status(200).end();
     }
-    
-    // If origin not allowed, still return 200 but without CORS headers
-    return res.status(200).end();
-  }
 
-  const app = await createApp();
-  return app(req, res);
+    const app = await createApp();
+    return app(req, res);
+  } catch (error: any) {
+    console.error('Serverless function error:', error);
+    res.status(500).json({ 
+      error: 'Internal Server Error', 
+      message: error?.message || 'Unknown error',
+      stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined
+    });
+  }
 }
 
