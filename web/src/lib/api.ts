@@ -52,15 +52,24 @@ api.interceptors.response.use(
     const originalRequest = error.config;
 
     // If error is 401 and we haven't tried to refresh yet
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Skip refresh for auth endpoints (login, register, refresh) to avoid infinite loops
+    const isAuthEndpoint = originalRequest.url?.includes('/auth/login') || 
+                          originalRequest.url?.includes('/auth/register') ||
+                          originalRequest.url?.includes('/auth/refresh');
+    
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
       if (isRefreshing) {
         // If already refreshing, queue this request
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         })
           .then((token) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
-            return api(originalRequest);
+            if (token) {
+              originalRequest.headers.Authorization = `Bearer ${token}`;
+              return api(originalRequest);
+            } else {
+              return Promise.reject(new Error("Token refresh failed"));
+            }
           })
           .catch((err) => {
             return Promise.reject(err);
@@ -71,7 +80,7 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        // Try to refresh the token
+        // Try to refresh the token - refresh token should be in HTTP-only cookie
         const response = await api.post<LoginResponse>("/auth/refresh", {}, { withCredentials: true });
         const { accessToken } = response.data;
         
@@ -90,6 +99,7 @@ api.interceptors.response.use(
         
         // Only redirect if we're not already on login/register page
         if (typeof window !== "undefined" && !window.location.pathname.includes("/auth")) {
+          console.error("[API] Token refresh failed, redirecting to login");
           window.location.href = "/auth/login";
         }
         return Promise.reject(refreshError);
