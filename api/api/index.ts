@@ -30,33 +30,9 @@ async function createApp(): Promise<express.Express> {
     
     const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
     
-    // CRITICAL: Don't set global prefix - Vercel rewrite already handles /api routing
-    // Controllers are @Controller('auth') which creates routes at /auth
-    // Incoming requests from Vercel: /api/auth/register
-    // We need to strip /api so it becomes /auth/register to match the route
-    
-    // Add path stripping middleware - this runs on each request BEFORE route matching
-    expressApp.use((req: Request, res: Response, next: NextFunction) => {
-      // Debug logging
-      console.log(`[Serverless] Incoming: ${req.method} ${req.url} (path: ${req.path})`);
-      
-      // req.path is read-only, manipulate req.url instead
-      // Express derives path from url
-      if (req.url && req.url.startsWith('/api/')) {
-        const originalUrl = req.url;
-        req.url = req.url.replace(/^\/api/, '');
-        
-        if (req.originalUrl && req.originalUrl.startsWith('/api/')) {
-          (req as any).originalUrl = req.originalUrl.replace(/^\/api/, '');
-        }
-        
-        console.log(`[Serverless] Stripped /api: ${originalUrl} -> ${req.url}`);
-      }
-      next();
-    });
-    
-    // NO global prefix - routes are at /auth, /wallet, etc.
-    // Incoming /api/auth/register -> strip to /auth/register -> matches @Controller('auth')
+    // DON'T set global prefix - controllers are at /auth, /wallet, etc.
+    // Path stripping happens in the handler function before NestJS processes the request
+    // app.setGlobalPrefix('api'); // REMOVED - we handle /api prefix in handler
   
   // Add security headers
   expressApp.use((req: Request, res: Response, next: NextFunction) => {
