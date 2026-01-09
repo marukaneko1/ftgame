@@ -30,10 +30,14 @@ async function createApp(): Promise<express.Express> {
     
     const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
     
-    // CRITICAL: Strip /api prefix AFTER NestJS app is created but before init
-    // Vercel rewrite sends /api/auth/login to this function as /api/auth/login
-    // NestJS controllers are defined as @Controller('auth'), which becomes /api/auth with global prefix
-    // But Vercel already includes /api in the path, so we need to strip it so NestJS can match
+    // DON'T set global prefix - we'll handle /api in the path stripping middleware
+    // Controllers are defined as @Controller('auth'), which will create routes at /auth
+    // We strip /api from incoming /api/auth/register to make it /auth/register
+    // So: incoming /api/auth/register -> middleware strips to /auth/register -> matches @Controller('auth') @Post('register')
+    
+    // CRITICAL: Strip /api prefix - this must happen AFTER NestJS app creation
+    // but the middleware will be called on every request
+    // NestJS registers routes at /auth (no prefix), incoming requests are /api/auth, we strip to /auth
     expressApp.use((req: Request, res: Response, next: NextFunction) => {
       // req.path is read-only, so we manipulate req.url instead
       // Express will derive path from url automatically
@@ -48,12 +52,7 @@ async function createApp(): Promise<express.Express> {
       next();
     });
     
-    // Set global prefix - NestJS will register routes as /api/auth
-    // But our middleware strips /api from incoming requests, so we actually DON'T want the prefix
-    // Controllers are @Controller('auth') which becomes /auth, and we strip /api from incoming /api/auth
-    // So we need: incoming /api/auth -> strip to /auth -> match controller /auth
-    // Therefore: NO global prefix, controllers are already at /auth
-    // app.setGlobalPrefix('api'); // REMOVED - path already has /api, we strip it, so no prefix needed
+    // NO global prefix - controllers are at /auth, incoming is /api/auth, we strip to /auth
   
   // Add security headers
   expressApp.use((req: Request, res: Response, next: NextFunction) => {
