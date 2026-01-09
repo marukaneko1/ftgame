@@ -5,14 +5,14 @@
   "outputDirectory": "dist",
   "framework": null,
   "functions": {
-    "api/vercel-serverless.ts": {
+    "vercel-serverless.ts": {
       "includeFiles": "dist/**"
     }
   },
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/vercel-serverless"
+      "source": "/(.*)",
+      "destination": "/vercel-serverless"
     }
   ]
 }
