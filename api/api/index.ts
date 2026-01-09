@@ -1,8 +1,8 @@
 import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import { AppModule } from '../dist/app.module';
-import * as express from 'express';
-import * as cookieParser from 'cookie-parser';
+import express, { Request, Response, NextFunction } from 'express';
+import cookieParser from 'cookie-parser';
 import { raw } from 'express';
 import { ValidationPipe } from '@nestjs/common';
 
@@ -19,7 +19,7 @@ async function createApp(): Promise<express.Express> {
   app.setGlobalPrefix('api');
   
   // Add security headers
-  expressApp.use((req, res, next) => {
+  expressApp.use((req: Request, res: Response, next: NextFunction) => {
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-XSS-Protection', '1; mode=block');
@@ -71,7 +71,7 @@ async function createApp(): Promise<express.Express> {
   return cachedApp;
 }
 
-export default async function handler(req: express.Request, res: express.Response) {
+export default async function handler(req: Request, res: Response) {
   const app = await createApp();
   return app(req, res);
 }
