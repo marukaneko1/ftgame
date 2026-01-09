@@ -1941,7 +1941,7 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
       const roomKey = sessionId ? `session:${sessionId}` : `game:${body.gameId}`;
 
       // Check if game is over (one player has all chips)
-      const playersWithChips = newState.players.filter(p => p.chips > 0);
+      const playersWithChips = newState.players.filter((p: any) => p.chips > 0);
       if (playersWithChips.length < 2) {
         // Game is over - mark as completed
         await (this.gamesService as any).prisma.game.update({
