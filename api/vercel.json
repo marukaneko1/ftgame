@@ -2,8 +2,14 @@
   "version": 2,
   "buildCommand": "npm run build",
   "installCommand": "cd .. && npm install",
-  "outputDirectory": "dist",
   "framework": null,
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "dist/**",
+      "memory": 1024,
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",
@@ -11,4 +17,3 @@
     }
   ]
 }
-
