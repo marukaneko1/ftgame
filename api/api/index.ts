@@ -20,6 +20,14 @@ async function createApp(): Promise<express.Express> {
   try {
     const expressApp = express();
     
+    // CRITICAL: Add CORS headers middleware FIRST (before path stripping)
+    // This ensures CORS headers are set even if path stripping or NestJS fails
+    expressApp.use((req: Request, res: Response, next: NextFunction) => {
+      const origin = req.headers.origin;
+      setCorsHeaders(res, origin);
+      next();
+    });
+    
     // CRITICAL: Strip /api prefix BEFORE creating NestJS app
     // Vercel rewrite sends /api/auth/login to this function as /api/auth/login
     // NestJS with setGlobalPrefix('api') expects routes without /api prefix
@@ -143,15 +151,35 @@ function setCorsHeaders(res: Response, origin: string | undefined) {
 export default async function handler(req: Request, res: Response) {
   const origin = req.headers.origin;
   
+  // CRITICAL: Set CORS headers FIRST, before any processing
+  // This ensures headers are always set, even if there's an error
+  setCorsHeaders(res, origin);
+  
   try {
     // SECURITY: Handle CORS preflight requests explicitly (must be before NestJS app)
     if (req.method === 'OPTIONS') {
-      setCorsHeaders(res, origin);
       return res.status(200).end();
     }
 
     const app = await createApp();
-    return app(req, res);
+    
+    // Wrap the app handler to catch any errors NestJS might throw
+    try {
+      await app(req, res);
+    } catch (nestError: any) {
+      // NestJS threw an error - ensure CORS headers are still set
+      setCorsHeaders(res, origin);
+      console.error('NestJS error:', nestError);
+      
+      // If response hasn't been sent yet, send error response
+      if (!res.headersSent) {
+        res.status(500).json({ 
+          error: 'Internal Server Error', 
+          message: nestError?.message || 'Unknown error',
+          stack: process.env.NODE_ENV === 'development' ? nestError?.stack : undefined
+        });
+      }
+    }
   } catch (error: any) {
     console.error('Serverless function error:', error);
     
@@ -171,11 +199,14 @@ export default async function handler(req: Request, res: Response) {
       });
     }
     
-    res.status(500).json({ 
-      error: 'Internal Server Error', 
-      message: error?.message || 'Unknown error',
-      stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined
-    });
+    // Only send response if headers haven't been sent
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: 'Internal Server Error', 
+        message: error?.message || 'Unknown error',
+        stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined
+      });
+    }
   }
 }
 
