@@ -47,6 +47,7 @@ enum GameType {
   TICTACTOE
   TRUTHS_AND_LIE
   BILLIARDS
+  POKER
 }
 
 enum GameStatus {
