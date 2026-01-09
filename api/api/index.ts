@@ -118,30 +118,35 @@ async function createApp(): Promise<express.Express> {
   }
 }
 
+// Helper to set CORS headers
+function setCorsHeaders(res: Response, origin: string | undefined) {
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+    : [process.env.WEB_BASE_URL || 'http://localhost:3000'];
+  
+  const isDev = process.env.NODE_ENV === 'development';
+  const isAllowed = origin && (
+    allowedOrigins.includes(origin) || 
+    origin.includes('.vercel.app') ||
+    (isDev && (origin.includes('localhost') || origin.includes('127.0.0.1')))
+  );
+  
+  if (isAllowed) {
+    res.setHeader('Access-Control-Allow-Origin', origin!);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Max-Age', '86400');
+  }
+}
+
 export default async function handler(req: Request, res: Response) {
+  const origin = req.headers.origin;
+  
   try {
     // SECURITY: Handle CORS preflight requests explicitly (must be before NestJS app)
     if (req.method === 'OPTIONS') {
-      const allowedOrigins = process.env.ALLOWED_ORIGINS
-        ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-        : [process.env.WEB_BASE_URL || 'http://localhost:3000'];
-      
-      const origin = req.headers.origin || '';
-      const isDev = process.env.NODE_ENV === 'development';
-      const isAllowed = allowedOrigins.includes(origin) || 
-                       origin.includes('.vercel.app') ||
-                       (isDev && (origin.includes('localhost') || origin.includes('127.0.0.1')));
-      
-      if (origin && isAllowed) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Access-Control-Max-Age', '86400');
-        return res.status(200).end();
-      }
-      
-      // If origin not allowed, still return 200 but without CORS headers
+      setCorsHeaders(res, origin);
       return res.status(200).end();
     }
 
@@ -149,6 +154,23 @@ export default async function handler(req: Request, res: Response) {
     return app(req, res);
   } catch (error: any) {
     console.error('Serverless function error:', error);
+    
+    // CRITICAL: Set CORS headers even on error responses
+    setCorsHeaders(res, origin);
+    
+    // Check if it's a database connection error
+    const isDbError = error?.message?.includes('database') || 
+                     error?.message?.includes('localhost:5433') ||
+                     error?.code === 'P1001';
+    
+    if (isDbError) {
+      return res.status(503).json({ 
+        error: 'Service Unavailable', 
+        message: 'Database connection failed. Please check DATABASE_URL environment variable.',
+        hint: 'Make sure DATABASE_URL is set in Vercel environment variables and points to a remote database (not localhost).'
+      });
+    }
+    
     res.status(500).json({ 
       error: 'Internal Server Error', 
       message: error?.message || 'Unknown error',
