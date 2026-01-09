@@ -169,14 +169,24 @@ export default async function handler(req: Request, res: Response) {
     } catch (nestError: any) {
       // NestJS threw an error - ensure CORS headers are still set
       setCorsHeaders(res, origin);
-      console.error('NestJS error:', nestError);
+      console.error('NestJS handler error:', nestError);
+      console.error('Error message:', nestError?.message);
+      console.error('Error stack:', nestError?.stack);
       
       // If response hasn't been sent yet, send error response
       if (!res.headersSent) {
+        // In production, don't expose stack traces but log them
+        const isProd = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
+        
         res.status(500).json({ 
           error: 'Internal Server Error', 
           message: nestError?.message || 'Unknown error',
-          stack: process.env.NODE_ENV === 'development' ? nestError?.stack : undefined
+          // Only show stack in development
+          stack: !isProd ? nestError?.stack : undefined,
+          // In production, show error type/name for debugging
+          errorType: nestError?.name || 'Error',
+          // Show if it's a validation error
+          isValidationError: nestError?.response?.statusCode === 400
         });
       }
     }
@@ -201,10 +211,19 @@ export default async function handler(req: Request, res: Response) {
     
     // Only send response if headers haven't been sent
     if (!res.headersSent) {
+      const isProd = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
+      
       res.status(500).json({ 
         error: 'Internal Server Error', 
         message: error?.message || 'Unknown error',
-        stack: process.env.NODE_ENV === 'development' ? error?.stack : undefined
+        errorType: error?.name || 'Error',
+        // Only show stack in development
+        stack: !isProd ? error?.stack : undefined,
+        // Helpful hints for common errors
+        hint: error?.code === 'P1001' ? 'Database connection failed. Check DATABASE_URL.' :
+              error?.message?.includes('JWT') ? 'JWT configuration error. Check JWT_ACCESS_SECRET and JWT_REFRESH_SECRET.' :
+              error?.message?.includes('REDIS') ? 'Redis connection error. Check REDIS_URL.' :
+              undefined
       });
     }
   }
