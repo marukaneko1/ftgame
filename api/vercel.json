@@ -4,15 +4,10 @@
   "installCommand": "cd .. && npm install",
   "outputDirectory": "dist",
   "framework": null,
-  "functions": {
-    "vercel-serverless.ts": {
-      "includeFiles": "dist/**"
-    }
-  },
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/vercel-serverless"
+      "destination": "/api"
     }
   ]
 }
