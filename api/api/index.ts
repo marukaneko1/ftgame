@@ -30,39 +30,33 @@ async function createApp(): Promise<express.Express> {
     
     const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
     
-    // CRITICAL: Strip /api prefix AFTER NestJS app creation
-    // When using ExpressAdapter, NestJS registers routes on the expressApp
-    // Middleware runs before route matching, so we can strip /api here
-    // Vercel rewrite sends /api/auth/login to this function as /api/auth/login
-    // Controllers are @Controller('auth') which creates /auth routes (no global prefix)
-    // We strip /api from incoming /api/auth/register -> /auth/register -> matches route
+    // CRITICAL: Don't set global prefix - Vercel rewrite already handles /api routing
+    // Controllers are @Controller('auth') which creates routes at /auth
+    // Incoming requests from Vercel: /api/auth/register
+    // We need to strip /api so it becomes /auth/register to match the route
+    
+    // Add path stripping middleware - this runs on each request BEFORE route matching
     expressApp.use((req: Request, res: Response, next: NextFunction) => {
-      // Log for debugging
-      if (process.env.VERCEL_ENV === 'development') {
-        console.log(`[Path Debug] Original URL: ${req.url}, Path: ${req.path}`);
-      }
+      // Debug logging
+      console.log(`[Serverless] Incoming: ${req.method} ${req.url} (path: ${req.path})`);
       
-      // req.path is read-only, so we manipulate req.url instead
-      // Express will derive path from url automatically
+      // req.path is read-only, manipulate req.url instead
+      // Express derives path from url
       if (req.url && req.url.startsWith('/api/')) {
-        // Strip /api prefix from URL - Express will update path automatically
-        const newUrl = req.url.replace(/^\/api/, '');
-        req.url = newUrl;
-        // Also update originalUrl if needed
+        const originalUrl = req.url;
+        req.url = req.url.replace(/^\/api/, '');
+        
         if (req.originalUrl && req.originalUrl.startsWith('/api/')) {
           (req as any).originalUrl = req.originalUrl.replace(/^\/api/, '');
         }
         
-        if (process.env.VERCEL_ENV === 'development') {
-          console.log(`[Path Debug] Stripped to: ${req.url}`);
-        }
+        console.log(`[Serverless] Stripped /api: ${originalUrl} -> ${req.url}`);
       }
       next();
     });
     
-    // DON'T set global prefix for serverless - controllers are at /auth
-    // Incoming: /api/auth/register -> middleware strips to /auth/register -> matches @Controller('auth') @Post('register')
-    // app.setGlobalPrefix('api'); // REMOVED - we strip /api prefix in middleware instead
+    // NO global prefix - routes are at /auth, /wallet, etc.
+    // Incoming /api/auth/register -> strip to /auth/register -> matches @Controller('auth')
   
   // Add security headers
   expressApp.use((req: Request, res: Response, next: NextFunction) => {
