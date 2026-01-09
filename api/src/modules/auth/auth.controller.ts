@@ -84,9 +84,12 @@ export class AuthController {
     if (!token) return;
     
     // Determine if we're in production (Vercel, HTTPS, etc.)
-    const isProduction: boolean = process.env.NODE_ENV === "production" || 
-                                   process.env.VERCEL === "1" || 
-                                   !!process.env.VERCEL_ENV;
+    // Explicitly convert each check to boolean to ensure TypeScript type inference
+    const isProduction = Boolean(
+      process.env.NODE_ENV === "production" || 
+      process.env.VERCEL === "1" || 
+      !!process.env.VERCEL_ENV
+    );
     
     // For production (HTTPS), use secure cookies with sameSite: "none" for cross-origin
     // For development (localhost), use sameSite: "lax"
