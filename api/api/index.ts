@@ -149,6 +149,21 @@ export default async function handler(req: Request, res: Response) {
       return res.status(200).end();
     }
 
+    // Handle root path with simple API info
+    if (req.url === '/' || req.path === '/') {
+      return res.status(200).json({
+        message: 'FT Game API',
+        version: '1.0.0',
+        status: 'online',
+        endpoints: {
+          auth: '/api/auth',
+          users: '/api/users',
+          games: '/api/games',
+          video: '/api/video'
+        }
+      });
+    }
+
     // Vercel rewrite sends /api/auth/register to this function as /api/auth/register
     // NestJS with setGlobalPrefix('api') expects /api/auth/register
     // Routes match directly - no path manipulation needed
