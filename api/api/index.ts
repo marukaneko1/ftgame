@@ -172,6 +172,20 @@ export default async function handler(req: Request, res: Response) {
       return res.status(200).end();
     }
 
+    // CRITICAL: Strip /api prefix from incoming request BEFORE passing to NestJS
+    // Vercel rewrite sends /api/auth/login to this function as /api/auth/login
+    // NestJS controllers are @Controller('auth'), so routes are at /auth (no global prefix)
+    // We need to strip /api so /api/auth/register becomes /auth/register
+    const originalUrl = req.url;
+    const originalPath = req.path;
+    if (req.url && req.url.startsWith('/api/')) {
+      req.url = req.url.replace(/^\/api/, '');
+      if (req.originalUrl && req.originalUrl.startsWith('/api/')) {
+        (req as any).originalUrl = req.originalUrl.replace(/^\/api/, '');
+      }
+      console.log(`[Handler] Stripped /api: ${originalUrl} -> ${req.url}`);
+    }
+
     const app = await createApp();
     
     // Wrap the app handler to catch any errors NestJS might throw
