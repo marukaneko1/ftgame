@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build",
+  "installCommand": "cd .. && npm install",
+  "outputDirectory": "dist",
+  "framework": null,
+  "functions": {
+    "api/vercel-serverless.ts": {
+      "includeFiles": "dist/**"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/vercel-serverless"
+    }
+  ]
+}
+
