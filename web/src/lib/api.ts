@@ -31,6 +31,77 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Handle token refresh on 401 responses
+let isRefreshing = false;
+let failedQueue: Array<{ resolve: (value?: any) => void; reject: (reason?: any) => void }> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+
+    // If error is 401 and we haven't tried to refresh yet
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        // If already refreshing, queue this request
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then((token) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            return api(originalRequest);
+          })
+          .catch((err) => {
+            return Promise.reject(err);
+          });
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        // Try to refresh the token
+        const response = await api.post<LoginResponse>("/auth/refresh", {}, { withCredentials: true });
+        const { accessToken } = response.data;
+        
+        if (accessToken) {
+          localStorage.setItem("accessToken", accessToken);
+          originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+          processQueue(null, accessToken);
+          return api(originalRequest);
+        } else {
+          throw new Error("No access token in refresh response");
+        }
+      } catch (refreshError: any) {
+        processQueue(refreshError, null);
+        // Refresh failed - user needs to log in again
+        localStorage.removeItem("accessToken");
+        
+        // Only redirect if we're not already on login/register page
+        if (typeof window !== "undefined" && !window.location.pathname.includes("/auth")) {
+          window.location.href = "/auth/login";
+        }
+        return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
+      }
+    }
+
+    return Promise.reject(error);
+  }
+);
+
 export interface LoginResponse {
   accessToken: string;
 }

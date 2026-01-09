@@ -82,11 +82,20 @@ export class AuthController {
 
   private setRefreshCookie(res: Response, token?: string) {
     if (!token) return;
+    
+    // Determine if we're in production (Vercel, HTTPS, etc.)
+    const isProduction = process.env.NODE_ENV === "production" || 
+                         process.env.VERCEL === "1" || 
+                         process.env.VERCEL_ENV;
+    
+    // For production (HTTPS), use secure cookies with sameSite: "none" for cross-origin
+    // For development (localhost), use sameSite: "lax"
     res.cookie("refresh_token", token, {
       httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: this.getRefreshMs()
+      sameSite: isProduction ? "none" : "lax", // "none" required for cross-origin with secure
+      secure: isProduction, // Secure cookies required for sameSite: "none"
+      maxAge: this.getRefreshMs(),
+      path: "/" // Ensure cookie is available for all paths
     });
   }
 
