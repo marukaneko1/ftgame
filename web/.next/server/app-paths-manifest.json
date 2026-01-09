@@ -1,7 +1,7 @@
 {
   "/play/page": "app/play/page.js",
   "/dashboard/page": "app/dashboard/page.js",
+  "/auth/login/page": "app/auth/login/page.js",
   "/settings/page": "app/settings/page.js",
-  "/session/[id]/page": "app/session/[id]/page.js",
-  "/auth/login/page": "app/auth/login/page.js"
+  "/session/[id]/page": "app/session/[id]/page.js"
 }
