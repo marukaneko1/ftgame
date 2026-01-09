@@ -55,7 +55,24 @@ export class AuthController {
   async refresh(@Body() dto: RefreshDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     // SECURITY: Pass client IP for brute force protection
     const clientIp = req.ip || req.headers['x-forwarded-for']?.toString()?.split(',')[0]?.trim() || 'unknown';
-    const tokens = await this.authService.refresh(dto, req.cookies?.refresh_token as string, clientIp);
+    
+    // Debug logging for cookie issues (remove in production if needed)
+    if (process.env.NODE_ENV === 'development' || process.env.VERCEL_ENV) {
+      console.log('[Refresh] Cookies:', req.cookies);
+      console.log('[Refresh] Cookie header:', req.headers.cookie);
+      console.log('[Refresh] DTO refreshToken:', dto.refreshToken ? 'present' : 'missing');
+    }
+    
+    // Try to get refresh token from cookie first, then from body
+    const refreshTokenFromCookie = req.cookies?.refresh_token;
+    const refreshToken = dto.refreshToken || refreshTokenFromCookie;
+    
+    if (!refreshToken) {
+      console.error('[Refresh] No refresh token found in cookie or body');
+      throw new UnauthorizedException("Missing refresh token. Please log in again.");
+    }
+    
+    const tokens = await this.authService.refresh(dto, refreshToken, clientIp);
     if (tokens.refreshToken) {
       this.setRefreshCookie(res, tokens.refreshToken);
     }

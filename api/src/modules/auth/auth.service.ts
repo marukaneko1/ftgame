@@ -224,7 +224,8 @@ export class AuthService {
   }
 
   async refresh(dto: RefreshDto, refreshTokenFromCookie?: string, clientIp?: string) {
-    const raw = dto.refreshToken || refreshTokenFromCookie;
+    // Accept refresh token from either body or cookie parameter
+    const raw = refreshTokenFromCookie || dto.refreshToken;
     if (!raw) {
       throw new UnauthorizedException("Missing refresh token");
     }
