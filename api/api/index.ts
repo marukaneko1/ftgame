@@ -30,9 +30,10 @@ async function createApp(): Promise<express.Express> {
     
     const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
     
-    // DON'T set global prefix - controllers are at /auth, /wallet, etc.
-    // Path stripping happens in the handler function before NestJS processes the request
-    // app.setGlobalPrefix('api'); // REMOVED - we handle /api prefix in handler
+    // Set global prefix - Vercel sends /api/auth/register, routes should be at /api/auth/register
+    // Controllers are @Controller('auth'), with prefix becomes /api/auth
+    // So incoming /api/auth/register matches /api/auth/register route
+    app.setGlobalPrefix('api');
   
   // Add security headers
   expressApp.use((req: Request, res: Response, next: NextFunction) => {
@@ -148,6 +149,9 @@ export default async function handler(req: Request, res: Response) {
       return res.status(200).end();
     }
 
+    // Vercel rewrite sends /api/auth/register to this function as /api/auth/register
+    // NestJS with setGlobalPrefix('api') expects /api/auth/register
+    // Routes match directly - no path manipulation needed
     const app = await createApp();
     
     // Wrap the app handler to catch any errors NestJS might throw
