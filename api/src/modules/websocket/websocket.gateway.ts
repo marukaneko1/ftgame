@@ -301,10 +301,22 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
     this.matchingIntervals.set(userId, checkInterval);
 
     // Clean up interval when client disconnects
+    // Use a delay to allow for reconnection - if user reconnects quickly, they stay in queue
     client.once("disconnect", () => {
       clearInterval(checkInterval);
       this.matchingIntervals.delete(userId);
-      this.matchmakingService.leaveQueue(userId);
+      
+      // Delay removing from queue to allow for quick reconnection
+      // If user reconnects within 2 seconds, they'll rejoin queue and this removal will be harmless
+      setTimeout(() => {
+        // Double-check user hasn't rejoined (check if new interval exists)
+        if (!this.matchingIntervals.has(userId)) {
+          this.matchmakingService.leaveQueue(userId);
+          this.logger.debug(`Removed user ${userId} from queue after disconnect (no reconnection)`);
+        } else {
+          this.logger.debug(`User ${userId} reconnected, keeping in queue`);
+        }
+      }, 2000); // 2 second grace period for reconnection
     });
   }
 
