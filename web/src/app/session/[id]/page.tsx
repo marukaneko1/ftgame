@@ -70,7 +70,10 @@ export default function SessionPage() {
   
   // New state for connection status
   const [connectionState, setConnectionState] = useState<string>("DISCONNECTED");
-  
+
+  // Peer connection status
+  const [peerConnected, setPeerConnected] = useState(false);
+
   // Wallet balance state
   const [walletBalance, setWalletBalance] = useState<number>(0);
   
@@ -1049,6 +1052,25 @@ export default function SessionPage() {
     ws.on("session.ready", (data: any) => {
       console.log("Session ready:", data);
       setSessionData(data);
+      setPeerConnected(true); // Peer is ready (we received session.ready with peer info)
+      setError(""); // Clear any errors when session is ready
+    });
+
+    ws.on("session.peerJoined", (data: any) => {
+      console.log("Peer joined session:", data);
+      // Update session data to reflect peer connection (use functional update to avoid stale closure)
+      setSessionData(prev => {
+        if (prev && data.sessionId === prev.sessionId) {
+          setPeerConnected(true); // Mark peer as connected
+          setError(""); // Clear errors - peer is connected
+          console.log("✅ Peer is now connected!");
+          return {
+            ...prev,
+            peer: { id: data.peer?.id || data.peerId || data.userId || prev.peer.id }
+          };
+        }
+        return prev;
+      });
     });
 
     ws.on("session.startGame", (data: { gameType: string; gameId?: string }) => {
@@ -1455,6 +1477,15 @@ export default function SessionPage() {
               <span className="ml-2 text-green-400">⏱ {formatDuration(sessionDuration)}</span>
             )}
           </p>
+          {sessionData && (
+            <p className="text-xs text-gray-500 mt-1">
+              {peerConnected ? (
+                <span className="text-green-400">✓ Peer connected: {sessionData.peer.id.slice(0, 8)}...</span>
+              ) : (
+                <span className="text-yellow-400">⏳ Waiting for peer to join...</span>
+              )}
+            </p>
+          )}
           {videoReady && (
             <p className="text-xs text-gray-500 mt-1">
               Video: {localVideoActive ? "✓ Local" : "✗ Local"} | {remoteVideoActive ? "✓ Remote" : "✗ Remote"}
@@ -1821,10 +1852,20 @@ export default function SessionPage() {
           <div className="bg-gray-900 p-4 border border-white/20">
             <p className="text-sm text-gray-400 mb-2">Session Info</p>
             <div className="text-xs text-gray-500 space-y-1">
-              <p>Peer: {sessionData?.peer.id || "Loading..."}</p>
+              <p>
+                Peer: {sessionData?.peer.id ? sessionData.peer.id.slice(0, 8) + "..." : "Loading..."}
+                {connected && sessionData?.peer?.id && (
+                  <span className="ml-2 text-green-400">✓ Connected</span>
+                )}
+              </p>
               <p>Channel: {sessionData?.video?.channelName || "Video not available (Agora not configured)"}</p>
               {sessionData?.video?.expiresAt && (
                 <p>Token expires: {new Date(sessionData.video.expiresAt).toLocaleTimeString()}</p>
+              )}
+              {!sessionData?.video && (
+                <p className="text-yellow-400 text-xs mt-2">
+                  ℹ️ Video disabled - games and chat still work!
+                </p>
               )}
             </div>
           </div>
