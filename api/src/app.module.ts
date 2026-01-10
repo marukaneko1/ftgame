@@ -12,6 +12,10 @@ import { VideoModule } from "./modules/video/video.module";
 import { AdminModule } from "./modules/admin/admin.module";
 import { RoomsModule } from "./modules/rooms/rooms.module";
 
+// Conditionally include WebSocket module only if not in serverless mode
+// WebSockets require persistent connections, which Vercel serverless functions don't support
+const isServerless = process.env.IS_SERVERLESS === 'true' || process.env.VERCEL === '1';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -24,7 +28,9 @@ import { RoomsModule } from "./modules/rooms/rooms.module";
     UsersModule,
     SubscriptionsModule,
     WalletModule,
-    WebsocketModule,
+    // Only load WebSocket module if not in serverless mode
+    // In serverless mode, WebSockets won't work, so we skip loading the module
+    ...(isServerless ? [] : [WebsocketModule]),
     VideoModule,
     AdminModule,
     RoomsModule

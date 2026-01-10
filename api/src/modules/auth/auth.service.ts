@@ -9,7 +9,7 @@ import { JwtService } from "@nestjs/jwt";
 import { ConfigService } from "@nestjs/config";
 import { OAuth2Client } from "google-auth-library";
 import { v4 as uuidv4 } from "uuid";
-import { JwtPayload } from "@omegle-game/shared/src/types/auth";
+import { JwtPayload } from "../../types/auth";
 
 /**
  * SECURITY: Account lockout configuration

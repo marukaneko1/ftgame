@@ -3,7 +3,7 @@ import { IsNumber, IsNotEmpty, Min, Max } from "class-validator";
 import { UsersService } from "./users.service";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
-import { JwtPayload } from "@omegle-game/shared/src/types/auth";
+import { JwtPayload } from "../../types/auth";
 
 class UpdateLocationDto {
   // SECURITY: Validate latitude is within valid range (-90 to 90)

@@ -20,7 +20,7 @@ import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RateLimitGuard } from "../../common/guards/rate-limit.guard";
 import { Request, Response } from "express";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
-import { JwtPayload } from "@omegle-game/shared/src/types/auth";
+import { JwtPayload } from "../../types/auth";
 
 @Controller("auth")
 export class AuthController {

@@ -2,7 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
 // Conditionally import AppModule - for serverless, we need a version without WebSocket
 import { AppModule } from '../dist/app.module';
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response, NextFunction, json, urlencoded } from 'express';
 import cookieParser from 'cookie-parser';
 import { raw } from 'express';
 import { ValidationPipe, ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
@@ -57,7 +57,7 @@ async function createApp(): Promise<express.Express> {
   try {
     const expressApp = express();
     
-    // CRITICAL: Add CORS headers middleware FIRST (before path stripping)
+    // CRITICAL: Add CORS headers middleware FIRST (before any other middleware)
     // This ensures CORS headers are set even if path stripping or NestJS fails
     expressApp.use((req: Request, res: Response, next: NextFunction) => {
       const origin = req.headers.origin;
@@ -65,7 +65,39 @@ async function createApp(): Promise<express.Express> {
       next();
     });
     
-    const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp));
+    // Add body parsing middleware BEFORE creating NestJS app
+    // But only if body hasn't been parsed already (for serverless compatibility)
+    expressApp.use((req: Request, res: Response, next: NextFunction) => {
+      // Skip body parsing if body is already parsed or stream is not readable
+      // In serverless functions (like Vercel), the body might already be available
+      if ((req as any).body !== undefined || !req.readable || req.readableEnded) {
+        return next();
+      }
+      
+      // Use json parser, but handle errors gracefully
+      json({ limit: '10mb' })(req, res, (err?: any) => {
+        if (err) {
+          console.error('[Serverless] Body parsing error:', err.message);
+          // If body parsing fails, try to continue anyway
+          // The body might already be available in req.body
+        }
+        next(err);
+      });
+    });
+    
+    // URL encoded body parser
+    expressApp.use((req: Request, res: Response, next: NextFunction) => {
+      if ((req as any).body !== undefined || !req.readable || req.readableEnded) {
+        return next();
+      }
+      urlencoded({ extended: true, limit: '10mb' })(req, res, next);
+    });
+    
+    // Create NestJS app with ExpressAdapter
+    // Disable NestJS's automatic body parsing since we added it manually above
+    const app = await NestFactory.create(AppModule, new ExpressAdapter(expressApp), {
+      bodyParser: false, // We handle body parsing manually above
+    });
     
     // Set global prefix - Vercel sends /api/auth/register, routes should be at /api/auth/register
     // Controllers are @Controller('auth'), with prefix becomes /api/auth
@@ -132,6 +164,10 @@ async function createApp(): Promise<express.Express> {
   expressApp.use(cookieParser());
   expressApp.use('/api/subscriptions/webhook', raw({ type: 'application/json', limit: '1mb' }));
   expressApp.use('/api/wallet/stripe/webhook', raw({ type: 'application/json', limit: '1mb' }));
+  
+  // IMPORTANT: Don't add body parsing here - NestJS ExpressAdapter handles it automatically
+  // Adding express.json() here causes "stream is not readable" errors in serverless environments
+  // NestJS automatically sets up body parsing via ExpressAdapter
   
   app.useGlobalPipes(
     new ValidationPipe({
@@ -286,12 +322,9 @@ export default async function handler(req: Request, res: Response) {
     }
     
     // Wrap the app handler to catch any errors NestJS might throw
-    // Also add error handler middleware to catch unhandled errors
-    app.on('error', (error: any) => {
-      console.error('[Serverless] Express app error:', error);
-    });
-    
     try {
+      // Handle request - NestJS ExpressAdapter will handle body parsing
+      // The request stream should be readable at this point
       await app(req, res);
     } catch (nestError: any) {
       // NestJS threw an error - ensure CORS headers are still set

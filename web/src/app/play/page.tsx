@@ -107,6 +107,21 @@ export default function PlayPage() {
       return;
     }
 
+    // Check if WebSocket URL suggests serverless environment (Vercel)
+    const isVercelUrl = WS_URL.includes("vercel.app") || WS_URL.includes("localhost:3001");
+    if (isVercelUrl && WS_URL.includes("vercel.app")) {
+      // Vercel serverless functions don't support WebSockets
+      alert(
+        "⚠️ WebSocket Connection Not Available\n\n" +
+        "WebSockets require persistent connections and are not supported in Vercel serverless functions. " +
+        "To use real-time matchmaking, you'll need to:\n\n" +
+        "1. Deploy the backend to a platform that supports WebSockets (Railway, Render, Fly.io, or a VPS)\n" +
+        "2. Update NEXT_PUBLIC_WS_URL to point to your WebSocket-enabled backend\n\n" +
+        "For now, matchmaking will not work in this environment."
+      );
+      return;
+    }
+
     // Try to refresh token before connecting (in case it's expired)
     try {
       // Attempt to refresh token - refresh token is in HTTP-only cookie
@@ -121,6 +136,7 @@ export default function PlayPage() {
       // If refresh fails with 401/403, the refresh token is invalid/expired
       if (refreshError.response?.status === 401 || refreshError.response?.status === 403) {
         console.error("[PlayPage] Token refresh failed, user may need to log in again");
+        console.error("[PlayPage] Refresh error details:", refreshError.response?.data);
         alert("Your session has expired. Please log in again.");
         router.push("/auth/login");
         setMatching(false);
@@ -237,6 +253,38 @@ export default function PlayPage() {
 
     ws.on("connect_error", async (err: any) => {
       console.error("[PlayPage] WebSocket connection error:", err.message, err);
+      
+      // Check if this is a WebSocket connection failure (common in serverless environments)
+      const isWebSocketError = err.message?.includes("websocket") || 
+                               err.message?.includes("TransportError") ||
+                               err.type === "TransportError" ||
+                               err.message?.includes("ECONNREFUSED") ||
+                               err.message?.includes("Failed to fetch");
+      
+      if (isWebSocketError) {
+        console.error("[PlayPage] WebSocket connection failed - WebSockets may not be supported in this environment");
+        // Clear timeouts and intervals
+        if (matchTimeoutRef.current) {
+          clearTimeout(matchTimeoutRef.current);
+          matchTimeoutRef.current = null;
+        }
+        if (matchDurationIntervalRef.current) {
+          clearInterval(matchDurationIntervalRef.current);
+          matchDurationIntervalRef.current = null;
+        }
+        setMatching(false);
+        setMatchingDuration(0);
+        ws.disconnect();
+        setSocket(null);
+        
+        // Show user-friendly error message
+        alert(
+          "WebSocket connection failed. " +
+          "WebSockets require persistent connections and are not supported in serverless environments like Vercel. " +
+          "For real-time matchmaking, you'll need to deploy the backend to a platform that supports WebSockets (e.g., Railway, Render, or a VPS)."
+        );
+        return;
+      }
       
       // If it's an auth error, try refreshing the token (refresh token is in HTTP-only cookie)
       if (err.message?.includes("token") || err.message?.includes("Unauthorized") || err.message?.includes("expired")) {

@@ -5,7 +5,7 @@ import { AdminGuard } from "../../common/guards/admin.guard";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { KycStatus, SubscriptionStatus, ReportStatus } from "@prisma/client";
 import { IsEnum, IsBoolean, IsString, IsOptional, IsDateString } from "class-validator";
-import { JwtPayload } from "@omegle-game/shared/src/types/auth";
+import { JwtPayload } from "../../types/auth";
 
 class VerifyUserDto {
   @IsBoolean()
