@@ -27,9 +27,30 @@ export default function BilliardsGameV2({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const initCompleteRef = useRef(false);
+  const retryCountRef = useRef(0);
+  const MAX_RETRIES = 10;
 
   useEffect(() => {
-    if (!canvasRef.current || typeof window === "undefined" || initCompleteRef.current) return;
+    if (typeof window === "undefined" || initCompleteRef.current) return;
+
+    // Wait for canvas to be available with retry mechanism
+    const checkCanvasAndInit = () => {
+      if (!canvasRef.current) {
+        retryCountRef.current++;
+        if (retryCountRef.current < MAX_RETRIES) {
+          console.log(`[BilliardsGameV2] Canvas ref not ready, retry ${retryCountRef.current}/${MAX_RETRIES}...`);
+          setTimeout(checkCanvasAndInit, 200);
+          return;
+        } else {
+          console.error("[BilliardsGameV2] Canvas ref not available after max retries");
+          setError("Canvas element not found. Please refresh the page.");
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // Canvas is ready, proceed with initialization
+      console.log("[BilliardsGameV2] Canvas ref is ready, starting initialization...");
 
     let container: any = null;
     let animationFrameId: number | null = null;
@@ -37,9 +58,16 @@ export default function BilliardsGameV2({
 
     const init = async () => {
       try {
+        console.log("[BilliardsGameV2] Starting initialization...");
         setIsLoading(true);
         setError(null);
 
+        // Check canvas is still available
+        if (!canvasRef.current) {
+          throw new Error("Canvas element not available");
+        }
+
+        console.log("[BilliardsGameV2] Importing billiards modules...");
         // Dynamically import billiards modules (client-side only)
         const { Container } = await import("@/lib/billiards/container");
         const { Assets } = await import("@/lib/billiards/view/assets");
@@ -47,24 +75,37 @@ export default function BilliardsGameV2({
         const { BeginEvent } = await import("@/lib/billiards/events/beginevent");
         const { WatchEvent } = await import("@/lib/billiards/events/watchevent");
         const { EventUtil } = await import("@/lib/billiards/events/eventutil");
+        
+        console.log("[BilliardsGameV2] Modules imported successfully");
 
+        console.log("[BilliardsGameV2] Creating assets...");
         // Create assets loader with local assets (no GLTF loading needed)
         const assets = Assets.localAssets("eightball");
         assetsRef.current = assets;
+        console.log("[BilliardsGameV2] Assets created");
 
+        console.log("[BilliardsGameV2] Creating keyboard handler...");
         // Create keyboard handler
         const keyboard = new Keyboard(canvasRef.current!);
+        console.log("[BilliardsGameV2] Keyboard handler created");
 
+        console.log("[BilliardsGameV2] Creating Container...");
         // Create container
-        container = new Container(
-          canvasRef.current!,
-          console.log,
-          assets,
-          "eightball",
-          keyboard,
-          odUserId
-        );
-        containerRef.current = container;
+        try {
+          container = new Container(
+            canvasRef.current!,
+            console.log,
+            assets,
+            "eightball",
+            keyboard,
+            odUserId
+          );
+          containerRef.current = container;
+          console.log("[BilliardsGameV2] Container created successfully");
+        } catch (containerError: any) {
+          console.error("[BilliardsGameV2] Container creation failed:", containerError);
+          throw new Error(`Failed to create Container: ${containerError.message || containerError}`);
+        }
         
         // Set to multiplayer mode
         container.isSinglePlayer = false;
@@ -154,12 +195,20 @@ export default function BilliardsGameV2({
         console.log("[BilliardsGameV2] Initialized successfully");
       } catch (err: any) {
         console.error("[BilliardsGameV2] Failed to initialize billiards:", err);
-        setError(err.message || "Failed to initialize game");
+        console.error("[BilliardsGameV2] Error stack:", err.stack);
+        console.error("[BilliardsGameV2] Error details:", {
+          message: err.message,
+          name: err.name,
+          cause: err.cause
+        });
+        setError(err.message || err.toString() || "Failed to initialize game");
         setIsLoading(false);
+        initCompleteRef.current = false; // Allow retry
       }
     };
 
-    init();
+    // Start checking for canvas
+    checkCanvasAndInit();
 
     return () => {
       if (remoteEventHandler) {
@@ -175,6 +224,7 @@ export default function BilliardsGameV2({
       container = null;
       initCompleteRef.current = false;
     };
+
   }, [gameId, socket, odUserId, initialState]);
 
   if (error) {
