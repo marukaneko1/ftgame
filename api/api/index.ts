@@ -5,7 +5,7 @@ import { AppModule } from '../dist/app.module';
 import express, { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
 import { raw } from 'express';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
@@ -141,6 +141,49 @@ async function createApp(): Promise<express.Express> {
     }),
   );
 
+  // Add global exception filter for better error messages in development
+  class CustomExceptionFilter implements ExceptionFilter {
+    catch(exception: any, host: ArgumentsHost) {
+      const ctx = host.switchToHttp();
+      const response = ctx.getResponse();
+      const request = ctx.getRequest();
+      
+      const status = exception instanceof HttpException 
+        ? exception.getStatus() 
+        : HttpStatus.INTERNAL_SERVER_ERROR;
+      
+      const message = exception instanceof HttpException 
+        ? exception.getResponse() 
+        : exception?.message || 'Internal server error';
+      
+      const isDev = process.env.NODE_ENV === 'development' || process.env.VERCEL_ENV === 'development';
+      
+      console.error('[Serverless] Exception caught:', exception?.name || exception?.constructor?.name, exception?.message);
+      console.error('[Serverless] Exception stack:', exception?.stack);
+      console.error('[Serverless] DATABASE_URL:', process.env.DATABASE_URL ? 'SET' : 'NOT SET');
+      console.error('[Serverless] REDIS_URL:', process.env.REDIS_URL ? 'SET' : 'NOT SET');
+      
+      const errorResponse: any = {
+        statusCode: status,
+        message: typeof message === 'string' ? message : (message as any)?.message || exception?.message || 'Internal server error',
+        error: exception?.name || exception?.constructor?.name || 'Error',
+      };
+      
+      if (isDev) {
+        errorResponse.stack = exception?.stack;
+        errorResponse.path = request.url;
+        errorResponse.method = request.method;
+        errorResponse.databaseUrlSet = !!process.env.DATABASE_URL;
+        errorResponse.redisUrlSet = !!process.env.REDIS_URL;
+        if (exception?.cause) errorResponse.cause = exception.cause;
+        if (exception?.code) errorResponse.code = exception.code;
+      }
+      
+      response.status(status).json(errorResponse);
+    }
+  }
+  app.useGlobalFilters(new CustomExceptionFilter());
+
     await app.init();
     cachedApp = expressApp;
     return cachedApp;
@@ -219,7 +262,28 @@ export default async function handler(req: Request, res: Response) {
     // Vercel rewrite sends /api/auth/register to this function as /api/auth/register
     // NestJS with setGlobalPrefix('api') expects /api/auth/register
     // Routes match directly - no path manipulation needed
-    const app = await createApp();
+    let app: express.Express;
+    try {
+      app = await createApp();
+    } catch (createError: any) {
+      // Error during app creation - log and return
+      console.error('[Serverless] Failed to create app:', createError);
+      console.error('[Serverless] Create error name:', createError?.name);
+      console.error('[Serverless] Create error message:', createError?.message);
+      console.error('[Serverless] Create error stack:', createError?.stack);
+      console.error('[Serverless] DATABASE_URL during create:', process.env.DATABASE_URL ? process.env.DATABASE_URL.substring(0, 50) + '...' : 'NOT SET');
+      
+      const isDev = process.env.NODE_ENV === 'development' || process.env.VERCEL_ENV === 'development';
+      
+      return res.status(500).json({
+        error: 'Failed to initialize application',
+        message: createError?.message || 'Unknown error during app initialization',
+        errorType: createError?.name || 'Error',
+        stack: isDev ? createError?.stack : undefined,
+        databaseUrlSet: !!process.env.DATABASE_URL,
+        redisUrlSet: !!process.env.REDIS_URL
+      });
+    }
     
     // Wrap the app handler to catch any errors NestJS might throw
     try {

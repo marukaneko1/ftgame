@@ -15,12 +15,21 @@ interface QueueRequest {
 @Injectable()
 export class MatchmakingService implements OnModuleDestroy {
   private readonly logger = new Logger(MatchmakingService.name);
-  private redis: Redis;
+  private redis: Redis | null = null;
+  
+  private async ensureRedis(): Promise<Redis> {
+    if (!this.redis) {
+      // Redis is not initialized - this should not happen in non-serverless mode
+      // In serverless mode, matchmaking won't work, so throw a clear error
+      throw new Error('Redis not initialized. Matchmaking requires Redis connection.');
+    }
+    return this.redis;
+  }
   // Track user -> queue key mapping (with timestamps for cleanup)
   private userQueues = new Map<string, { key: string; addedAt: number }>();
   // Cleanup interval
   private cleanupInterval: NodeJS.Timeout | null = null;
-  
+
   private getStaleEntryMs(): number {
     return this.configService.get<number>("intervals.matchmakingStaleTimeout") || 600000; // 10 minutes default
   }
@@ -33,6 +42,13 @@ export class MatchmakingService implements OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService
   ) {
+    // Skip Redis connection in serverless environments - connect lazily on first use
+    // This prevents timeouts during serverless function initialization
+    if (process.env.IS_SERVERLESS === 'true') {
+      this.logger.log('Skipping Redis connection in serverless mode - will connect on first use');
+      return;
+    }
+
     const redisUrl = configService.get<string>("redisUrl") || "redis://localhost:6379";
     
     // Check if this is an Upstash Redis URL (requires TLS)

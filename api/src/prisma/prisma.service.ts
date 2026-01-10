@@ -7,6 +7,13 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
   private connectionAttempted = false;
 
   async onModuleInit() {
+    // Skip connection in serverless environments - connect on first query instead
+    // This prevents timeouts during serverless function initialization
+    if (process.env.IS_SERVERLESS === 'true') {
+      this.logger.log('Skipping database connection in serverless mode - will connect on first query');
+      return;
+    }
+    
     // Lazy connection: only connect when actually needed
     // This prevents crashes during serverless function initialization
     // Connection will happen on first query instead
