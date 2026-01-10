@@ -286,6 +286,11 @@ export default async function handler(req: Request, res: Response) {
     }
     
     // Wrap the app handler to catch any errors NestJS might throw
+    // Also add error handler middleware to catch unhandled errors
+    app.on('error', (error: any) => {
+      console.error('[Serverless] Express app error:', error);
+    });
+    
     try {
       await app(req, res);
     } catch (nestError: any) {
@@ -322,6 +327,8 @@ export default async function handler(req: Request, res: Response) {
             redisUrlSet: !!process.env.REDIS_URL
           })
         });
+      } else {
+        console.error('[Serverless] Response already sent, cannot send error details');
       }
     }
   } catch (error: any) {
