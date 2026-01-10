@@ -100,26 +100,28 @@ export class MatchmakingService implements OnModuleDestroy {
     this.redis = new Redis(redisOptions);
     
     // Handle Redis connection errors to prevent unhandled error events
-    this.redis.on("error", (err) => {
-      this.logger.error(`Redis connection error: ${err.message}`);
-      // Don't throw - let Redis handle reconnection automatically
-    });
-    
-    this.redis.on("connect", () => {
-      this.logger.log("Connected to Redis server");
-    });
-    
-    this.redis.on("ready", () => {
-      this.logger.log("Redis client ready");
-    });
-    
-    this.redis.on("close", () => {
-      this.logger.warn("Redis connection closed");
-    });
-    
-    this.redis.on("reconnecting", () => {
-      this.logger.log("Reconnecting to Redis...");
-    });
+    if (this.redis) {
+      this.redis.on("error", (err) => {
+        this.logger.error(`Redis connection error: ${err.message}`);
+        // Don't throw - let Redis handle reconnection automatically
+      });
+      
+      this.redis.on("connect", () => {
+        this.logger.log("Connected to Redis server");
+      });
+      
+      this.redis.on("ready", () => {
+        this.logger.log("Redis client ready");
+      });
+      
+      this.redis.on("close", () => {
+        this.logger.warn("Redis connection closed");
+      });
+      
+      this.redis.on("reconnecting", () => {
+        this.logger.log("Reconnecting to Redis...");
+      });
+    }
     
     // Start periodic cleanup of stale userQueues entries
     this.cleanupInterval = setInterval(() => {
@@ -148,7 +150,9 @@ export class MatchmakingService implements OnModuleDestroy {
       if (!entry) continue;
       
       // Check if user is actually still in the Redis queue
-      const items = await this.redis.lrange(entry.key, 0, -1);
+      if (!this.redis) return;
+      const redis = await this.ensureRedis();
+      const items = await redis.lrange(entry.key, 0, -1);
       let stillInQueue = false;
       
       for (const item of items) {
@@ -219,7 +223,8 @@ export class MatchmakingService implements OnModuleDestroy {
     await this.leaveQueue(userId);
     
     const payload: QueueRequest = { userId, region, language, latitude, longitude, enqueuedAt: Date.now() };
-    await this.redis.rpush(key, JSON.stringify(payload));
+    const redis = await this.ensureRedis();
+    await redis.rpush(key, JSON.stringify(payload));
     this.userQueues.set(userId, { key, addedAt: Date.now() });
     
     // Try to find the closest match
@@ -228,7 +233,7 @@ export class MatchmakingService implements OnModuleDestroy {
       return match;
     }
     
-    const length = await this.redis.llen(key);
+    const length = await redis.llen(key);
     this.logger.log(`User ${userId} joined queue ${key}. Queue length: ${length}`);
     return null;
   }
@@ -245,8 +250,9 @@ export class MatchmakingService implements OnModuleDestroy {
         let cursor = "0";
         
         // Use SCAN to iteratively find all queue keys (production-safe, non-blocking)
+        const redis = await this.ensureRedis();
         do {
-          const result = await this.redis.scan(
+          const result = await redis.scan(
             cursor,
             "MATCH",
             "match_queue:*",
@@ -259,7 +265,7 @@ export class MatchmakingService implements OnModuleDestroy {
         
         // Search through each queue key to find the user
         for (const possibleKey of allQueueKeys) {
-          const items = await this.redis.lrange(possibleKey, 0, -1);
+          const items = await redis.lrange(possibleKey, 0, -1);
           for (const item of items) {
             try {
               const parsed = JSON.parse(item);
@@ -282,7 +288,8 @@ export class MatchmakingService implements OnModuleDestroy {
     
     // Remove ALL occurrences of this user from the queue (handle duplicates)
     // Collect all matching items first to avoid race conditions during iteration
-    const items = await this.redis.lrange(key, 0, -1);
+    const redis = await this.ensureRedis();
+    const items = await redis.lrange(key, 0, -1);
     const matchingItems: string[] = [];
     for (const item of items) {
       try {
@@ -295,9 +302,9 @@ export class MatchmakingService implements OnModuleDestroy {
       }
     }
     
-    // Remove all matching items using a pipeline for atomic operation
-    if (matchingItems.length > 0) {
-      const pipeline = this.redis.pipeline();
+      // Remove all matching items using a pipeline for atomic operation
+      if (matchingItems.length > 0 && this.redis) {
+        const pipeline = this.redis.pipeline();
       for (const item of matchingItems) {
         pipeline.lrem(key, 0, item); // Remove all occurrences of this exact JSON string
       }
@@ -318,7 +325,8 @@ export class MatchmakingService implements OnModuleDestroy {
   }
 
   private async findClosestMatch(userId: string, queueKey: string, userLat?: number, userLon?: number): Promise<[QueueRequest, QueueRequest] | null> {
-    const length = await this.redis.llen(queueKey);
+    const redis = await this.ensureRedis();
+    const length = await redis.llen(queueKey);
     this.logger.debug(`findClosestMatch for ${userId}, queue length: ${length}`);
     if (length < 2) {
       this.logger.debug(`Queue too short (${length} < 2)`);
@@ -326,7 +334,7 @@ export class MatchmakingService implements OnModuleDestroy {
     }
 
     // Get all users in queue
-    const allItems = await this.redis.lrange(queueKey, 0, -1);
+    const allItems = await redis.lrange(queueKey, 0, -1);
     this.logger.debug(`Found ${allItems.length} items in queue`);
     const queueRequests: Array<{ request: QueueRequest; distance: number }> = [];
     
@@ -413,21 +421,21 @@ export class MatchmakingService implements OnModuleDestroy {
     // Use Redis WATCH + MULTI/EXEC for atomic operation
     // This ensures that if the queue changes between our read and write, the transaction fails
     try {
-      await this.redis.watch(queueKey);
-      
-      // Double-check both users are still in queue before removing
-      const currentQueueItems = await this.redis.lrange(queueKey, 0, -1);
+      await redis.watch(queueKey);
+        
+        // Double-check both users are still in queue before removing
+        const currentQueueItems = await redis.lrange(queueKey, 0, -1);
       const currentUserStillInQueue = currentQueueItems.includes(currentUserJson);
       const matchUserStillInQueue = currentQueueItems.includes(matchUserJson);
       
-      if (!currentUserStillInQueue || !matchUserStillInQueue) {
-        await this.redis.unwatch();
+        if (!currentUserStillInQueue || !matchUserStillInQueue) {
+          await redis.unwatch();
         this.logger.debug(`Users no longer in queue (current: ${currentUserStillInQueue}, match: ${matchUserStillInQueue})`);
         return null;
       }
       
-      // Execute atomic removal
-      const pipeline = this.redis.multi();
+        // Execute atomic removal
+        const pipeline = redis.multi();
       pipeline.lrem(queueKey, 1, currentUserJson);
       pipeline.lrem(queueKey, 1, matchUserJson);
       const results = await pipeline.exec();
@@ -445,17 +453,21 @@ export class MatchmakingService implements OnModuleDestroy {
       
       if (removed1 === 0 || removed2 === 0) {
         this.logger.warn(`Removal failed in transaction (removed1: ${removed1}, removed2: ${removed2})`);
-        // Re-add current user if needed
-        if (removed1 > 0 && removed2 === 0) {
-          await this.redis.rpush(queueKey, currentUserJson);
+          // Re-add current user if needed
+          if (removed1 > 0 && removed2 === 0) {
+            await redis.rpush(queueKey, currentUserJson);
         }
         return null;
       }
       
       this.logger.log(`Successfully matched ${userId} with ${closestMatch.userId} (atomic)`);
-    } catch (err) {
-      this.logger.error("Transaction error:", err);
-      await this.redis.unwatch();
+      } catch (err) {
+        this.logger.error("Transaction error:", err);
+        try {
+          await redis.unwatch();
+        } catch {
+          // Ignore unwatch errors
+        }
       return null;
     }
     this.userQueues.delete(userId);
