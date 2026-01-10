@@ -1706,7 +1706,7 @@ export default function SessionPage() {
               }}
             />
           ) : gameType && gameId && (gameType === "BILLIARDS" || gameType?.toUpperCase() === "BILLIARDS") ? (
-            <BilliardsGameV2
+            <BilliardsGame
               gameId={gameId}
               socket={socket!}
               odUserId={userId}
