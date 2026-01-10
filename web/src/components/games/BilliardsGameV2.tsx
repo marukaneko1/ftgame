@@ -235,10 +235,11 @@ export default function BilliardsGameV2({
       if (remoteEventHandler) {
         socket.off("billiards.event", remoteEventHandler);
       }
-      if (container && container.frame) {
+      if (container) {
         // Cancel animation frame properly
-        if (container.frame) {
-          cancelAnimationFrame(container.frame as number);
+        if (container.frameId !== null) {
+          cancelAnimationFrame(container.frameId);
+          container.frameId = null;
         }
         container.frame = null;
       }

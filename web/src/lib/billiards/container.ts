@@ -42,6 +42,7 @@ export class Container {
   hud!: Hud
   lobbyIndicator!: LobbyIndicator
   frame: ((timestamp: number) => void) | null = null
+  frameId: number | null = null // Store the requestAnimationFrame ID for cancellation
 
   last = performance.now()
   readonly step = 0.001953125 * 1
@@ -81,7 +82,8 @@ export class Container {
   }
 
   advance(elapsed: number) {
-    this.frame?.(elapsed)
+    // Removed this.frame?.(elapsed) - it was causing infinite recursion
+    // frame is meant to be used by requestAnimationFrame, not called directly
 
     const steps = Math.floor(elapsed / this.step)
     const computedElapsed = steps * this.step
@@ -137,7 +139,7 @@ export class Container {
     this.frame = (t: number) => {
       this.animate(t)
     }
-    requestAnimationFrame(this.frame)
+    this.frameId = requestAnimationFrame(this.frame)
   }
 
   updateController(controller: any) {
