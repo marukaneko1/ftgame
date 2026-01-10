@@ -9,7 +9,7 @@ import TicTacToeGame from "@/components/games/TicTacToeGame";
 import ChessGame from "@/components/games/ChessGame";
 import TriviaGame from "@/components/games/TriviaGame";
 import TruthsAndLieGame from "@/components/games/TruthsAndLieGame";
-import BilliardsGame from "@/components/games/BilliardsGame";
+import BilliardsGameV2 from "@/components/games/BilliardsGameV2";
 import PokerGame from "@/components/games/PokerGame";
 import BackButton from "@/components/BackButton";
 
@@ -1705,7 +1705,7 @@ export default function SessionPage() {
               }}
             />
           ) : gameType && gameId && (gameType === "BILLIARDS" || gameType?.toUpperCase() === "BILLIARDS") ? (
-            <BilliardsGame
+            <BilliardsGameV2
               gameId={gameId}
               socket={socket!}
               odUserId={userId}
