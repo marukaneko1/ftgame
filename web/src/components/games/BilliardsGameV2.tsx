@@ -39,6 +39,15 @@ export default function BilliardsGameV2({
     let retryTimeout: NodeJS.Timeout | null = null;
 
     const init = async () => {
+      // Set a timeout to detect if initialization hangs
+      const initTimeout = setTimeout(() => {
+        if (isLoading) {
+          console.error("[BilliardsGameV2] Initialization timeout - taking too long");
+          setError("Initialization is taking too long. Please refresh the page.");
+          setIsLoading(false);
+        }
+      }, 10000); // 10 second timeout
+
       try {
         console.log("[BilliardsGameV2] Starting initialization...");
         setIsLoading(true);
@@ -172,10 +181,12 @@ export default function BilliardsGameV2({
         // Start animation loop
         container.animate(performance.now());
         
+        clearTimeout(initTimeout);
         initCompleteRef.current = true;
         setIsLoading(false);
         console.log("[BilliardsGameV2] Initialized successfully");
       } catch (err: any) {
+        clearTimeout(initTimeout);
         console.error("[BilliardsGameV2] Failed to initialize billiards:", err);
         console.error("[BilliardsGameV2] Error stack:", err.stack);
         console.error("[BilliardsGameV2] Error details:", {
