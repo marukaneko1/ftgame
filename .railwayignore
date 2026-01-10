@@ -1,0 +1,12 @@
+# Railway ignore file
+# This tells Railway to ignore these files/folders during security scans
+
+# Ignore web folder - we only deploy api to Railway
+web/
+node_modules/
+.git/
+.next/
+dist/
+*.log
+.DS_Store
+
