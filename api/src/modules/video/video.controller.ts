@@ -17,7 +17,13 @@ export class VideoController {
   @Get("app-id")
   getAppId() {
     // Public endpoint - just returns app ID for frontend initialization
-    return { appId: this.videoService.getAppId() };
+    // Return null if not configured instead of throwing error
+    try {
+      return { appId: this.videoService.getAppId() };
+    } catch (error: any) {
+      // Return null appId if Agora is not configured (allows app to work without video)
+      return { appId: null };
+    }
   }
 }
 

@@ -212,17 +212,30 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
     const session = await this.sessionsService.createSession(a.userId, b.userId, channelName);
     this.logger.log(`Created session ${session.id} for users ${a.userId} and ${b.userId}`);
     
-    const tokens = [
-      { userId: a.userId, token: this.videoService.buildToken(channelName, a.userId) },
-      { userId: b.userId, token: this.videoService.buildToken(channelName, b.userId) }
-    ];
+    // Try to generate video tokens, but don't fail if Agora is not configured
+    const tokens: Array<{ userId: string; token: { token: string; channelName: string; expiresAt: string } | null }> = [];
+    try {
+      tokens.push({ userId: a.userId, token: this.videoService.buildToken(channelName, a.userId) });
+      tokens.push({ userId: b.userId, token: this.videoService.buildToken(channelName, b.userId) });
+    } catch (error: any) {
+      // If Agora is not configured, continue without video tokens
+      if (error.message?.includes("Agora") || error.message?.includes("AGORA")) {
+        this.logger.warn("⚠️ Agora credentials not configured - session will continue without video features");
+        tokens.push({ userId: a.userId, token: null });
+        tokens.push({ userId: b.userId, token: null });
+      } else {
+        // For other errors, re-throw
+        throw error;
+      }
+    }
+    
     const payloadFor = (recipientId: string) => {
       const peerId = recipientId === a.userId ? b.userId : a.userId;
-      const token = tokens.find((t) => t.userId === recipientId)?.token;
+      const tokenData = tokens.find((t) => t.userId === recipientId)?.token;
       return {
         sessionId: session.id,
         peer: { id: peerId },
-        video: { channelName, token: token?.token, expiresAt: token?.expiresAt }
+        video: tokenData ? { channelName, token: tokenData.token, expiresAt: tokenData.expiresAt } : null
       };
     };
     
@@ -298,13 +311,14 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
     @ConnectedSocket() client: Socket,
     @MessageBody() body: { sessionId: string }
   ) {
+    let session: any = null;
     try {
       const user = (client as any).user;
       if (!user || !user.sub) {
         client.emit("error", { message: "Authentication required" });
         return;
       }
-      const session = await this.sessionsService.getSession(body.sessionId);
+      session = await this.sessionsService.getSession(body.sessionId);
       if (!session) {
         client.emit("error", { message: "Session not found" });
         return;
@@ -316,14 +330,46 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
       client.join(`session:${body.sessionId}`);
       const peerId = session.userAId === user.sub ? session.userBId : session.userAId;
       const channelName = session.videoChannelName;
-      const token = this.videoService.buildToken(channelName, user.sub);
+      
+      // Try to generate video token, but don't fail if Agora is not configured
+      let videoToken = null;
+      try {
+        const token = this.videoService.buildToken(channelName, user.sub);
+        videoToken = { channelName, token: token.token, expiresAt: token.expiresAt };
+      } catch (error: any) {
+        // If Agora is not configured, continue without video token
+        if (error.message?.includes("Agora") || error.message?.includes("AGORA")) {
+          this.logger.warn("⚠️ Agora credentials not configured - session ready without video token");
+        } else {
+          // For other errors, re-throw to be caught by outer catch
+          throw error;
+        }
+      }
+      
       client.emit("session.ready", {
         sessionId: session.id,
         peer: { id: peerId },
-        video: { channelName, token: token.token, expiresAt: token.expiresAt }
+        video: videoToken
       });
     } catch (error: any) {
       this.logger.error("Error in session.join:", error);
+      // Don't send Agora-related errors to client - they're non-critical
+      if (error.message?.includes("Agora") || error.message?.includes("AGORA")) {
+        this.logger.warn("⚠️ Agora error in session.join - sending session.ready without video");
+        // Still send session.ready, just without video token (only if we have session data)
+        if (session) {
+          const user = (client as any).user;
+          if (user && user.sub) {
+            const peerId = session.userAId === user.sub ? session.userBId : session.userAId;
+            client.emit("session.ready", {
+              sessionId: session.id,
+              peer: { id: peerId },
+              video: null
+            });
+            return;
+          }
+        }
+      }
       client.emit("error", { message: error.message || "Failed to join session" });
     }
   }

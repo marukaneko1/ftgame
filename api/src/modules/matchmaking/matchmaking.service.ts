@@ -327,15 +327,15 @@ export class MatchmakingService implements OnModuleDestroy {
   private async findClosestMatch(userId: string, queueKey: string, userLat?: number, userLon?: number): Promise<[QueueRequest, QueueRequest] | null> {
     const redis = await this.ensureRedis();
     const length = await redis.llen(queueKey);
-    this.logger.debug(`findClosestMatch for ${userId}, queue length: ${length}`);
+    this.logger.log(`[MATCHMAKING] findClosestMatch for ${userId}, queue: ${queueKey}, length: ${length}`);
     if (length < 2) {
-      this.logger.debug(`Queue too short (${length} < 2)`);
+      this.logger.warn(`[MATCHMAKING] Queue too short (${length} < 2) - need at least 2 users to match`);
       return null;
     }
 
     // Get all users in queue
     const allItems = await redis.lrange(queueKey, 0, -1);
-    this.logger.debug(`Found ${allItems.length} items in queue`);
+    this.logger.log(`[MATCHMAKING] Found ${allItems.length} items in queue ${queueKey}`);
     const queueRequests: Array<{ request: QueueRequest; distance: number }> = [];
     
     for (const item of allItems) {
@@ -349,7 +349,11 @@ export class MatchmakingService implements OnModuleDestroy {
         // Verify user is still eligible
         const eligible = await this.ensureEligible(request.userId);
         if (!eligible) {
-          this.logger.debug(`User ${request.userId} is not eligible`);
+          const userDetails = await this.prisma.user.findUnique({
+            where: { id: request.userId },
+            select: { isBanned: true, is18PlusVerified: true, subscription: { select: { status: true } } }
+          });
+          this.logger.warn(`[MATCHMAKING] User ${request.userId} is not eligible - banned: ${userDetails?.isBanned}, verified: ${userDetails?.is18PlusVerified}, subscription: ${userDetails?.subscription?.status}`);
           continue;
         }
         
@@ -367,7 +371,7 @@ export class MatchmakingService implements OnModuleDestroy {
     }
     
     if (queueRequests.length === 0) {
-      this.logger.debug("No eligible matches found");
+      this.logger.warn(`[MATCHMAKING] No eligible matches found for ${userId} in queue ${queueKey} (checked ${allItems.length} items)`);
       return null;
     }
     

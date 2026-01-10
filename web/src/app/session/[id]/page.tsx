@@ -264,13 +264,27 @@ export default function SessionPage() {
         console.log("Starting video initialization...");
         setError("");
         
-        // Get Agora App ID
-        const appIdResponse = await videoApi.getAppId();
-        appId = appIdResponse.appId;
+        // Get Agora App ID - gracefully handle missing credentials
+        let appIdResponse: { appId: string | null };
+        try {
+          appIdResponse = await videoApi.getAppId();
+        } catch (apiError: any) {
+          // If API call fails (e.g., 500 error), assume Agora is not configured
+          console.warn("⚠️ Agora App ID endpoint failed - video features will be disabled");
+          console.warn("⚠️ Error:", apiError?.response?.data?.message || apiError?.message);
+          appIdResponse = { appId: null };
+        }
+        
+        appId = appIdResponse.appId || "";
         if (!appId) {
-          console.error("Agora App ID not found");
-          setError("Agora App ID not configured");
-          return;
+          console.warn("⚠️ Agora App ID not configured - video features will be disabled");
+          console.warn("⚠️ Matchmaking and games will still work, but video calls won't be available");
+          setError("Video features disabled: Agora credentials not configured. Matchmaking and games will still work.");
+          // Skip video initialization but allow session to continue (games will work)
+          if (isMounted) {
+            setVideoReady(false); // Video not ready, but that's OK
+          }
+          return; // Skip video initialization but continue with session
         }
 
         console.log("Agora App ID:", appId);
@@ -873,7 +887,17 @@ export default function SessionPage() {
           errorMsg = "Camera or microphone not found or already in use.";
         }
         
-        setError(`Video error: ${errorMsg}`);
+        // Don't show alert for missing Agora credentials - just log and continue
+        if (errorMsg.includes("AGORA_APP_ID") || errorMsg.includes("Agora credentials missing")) {
+          console.warn("⚠️ Agora not configured - continuing without video. Games and matchmaking still work!");
+          setError("Video disabled: Agora credentials not configured. Games and matchmaking still work!");
+        } else {
+          setError(`Video error: ${errorMsg}`);
+          // Only show alert for actual errors, not missing configuration
+          if (errorMsg.includes("permission") || errorMsg.includes("camera") || errorMsg.includes("microphone")) {
+            alert(`Video call setup failed: ${errorMsg}\n\nGames and matchmaking will still work.`);
+          }
+        }
         console.error("Full error details:", error);
         if (appId) {
           console.error("App ID used:", appId);
@@ -881,7 +905,6 @@ export default function SessionPage() {
         if (sessionData?.video?.channelName) {
           console.error("Channel:", sessionData.video.channelName);
         }
-        alert(`Failed to start video call: ${errorMsg}\n\nPlease check:\n1. Agora credentials are correct and match your Agora console\n2. Camera and microphone permissions\n3. Browser console for details`);
       }
     };
 

@@ -209,9 +209,20 @@ export const usersApi = {
 };
 
 export const videoApi = {
-  getAppId: async (): Promise<{ appId: string }> => {
-    const response = await api.get<{ appId: string }>("/video/app-id");
-    return response.data;
+  getAppId: async (): Promise<{ appId: string | null }> => {
+    try {
+      const response = await api.get<{ appId: string | null }>("/video/app-id");
+      return response.data;
+    } catch (error: any) {
+      // If API returns error (e.g., 500, 400, or any error), return null appId (allows app to work without Agora)
+      // Silently handle - don't log error details to avoid noise, just return null
+      // This is expected when Agora credentials are not configured
+      if (error.response?.status !== 500 && error.response?.status !== 400) {
+        // Only log non-expected errors
+        console.warn("⚠️ Agora App ID endpoint failed - video features will be disabled");
+      }
+      return { appId: null };
+    }
   },
   getToken: async (sessionId: string): Promise<{ token: string; channelName: string; expiresAt: string }> => {
     const response = await api.get<{ token: string; channelName: string; expiresAt: string }>(`/video/token?sessionId=${sessionId}`);

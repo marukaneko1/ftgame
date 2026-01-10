@@ -108,8 +108,13 @@ export default function PlayPage() {
     }
 
     // Check if WebSocket URL suggests serverless environment (Vercel)
-    const isVercelUrl = WS_URL.includes("vercel.app") || WS_URL.includes("localhost:3001");
-    if (isVercelUrl && WS_URL.includes("vercel.app")) {
+    // But allow Railway URLs (which support WebSockets)
+    const isVercelUrl = WS_URL.includes("vercel.app");
+    const isRailwayUrl = WS_URL.includes("railway.app");
+    const isLocalhost = WS_URL.includes("localhost:3001");
+    
+    // Only show error for Vercel URLs (not Railway or localhost with normal API)
+    if (isVercelUrl && !isRailwayUrl) {
       // Vercel serverless functions don't support WebSockets
       alert(
         "⚠️ WebSocket Connection Not Available\n\n" +
@@ -121,29 +126,34 @@ export default function PlayPage() {
       );
       return;
     }
+    
+    // Warn about localhost WebSocket in vercel dev (but don't block)
+    if (isLocalhost) {
+      console.warn("[PlayPage] WebSocket connecting to localhost:3001 - this may not work with vercel dev. Consider using Railway WebSocket URL.");
+    }
 
     // Try to refresh token before connecting (in case it's expired)
+    // Note: When connecting from localhost to Railway, refresh token cookie might not be available (cross-origin)
+    // So we'll try refresh, but continue with existing token if it fails (it might still be valid)
     try {
       // Attempt to refresh token - refresh token is in HTTP-only cookie
-      // Note: The refresh endpoint may require a refreshToken in body or cookie
-      const refreshResponse = await api.post("/auth/refresh", {});
+      // When connecting from localhost to Railway, cookies might not work cross-origin
+      const refreshResponse = await api.post("/auth/refresh", {}, { withCredentials: true });
       if (refreshResponse.data?.accessToken) {
         token = refreshResponse.data.accessToken as string;
         localStorage.setItem("accessToken", token);
         console.log("[PlayPage] Token refreshed before WebSocket connection");
       }
     } catch (refreshError: any) {
-      // If refresh fails with 401/403, the refresh token is invalid/expired
+      // If refresh fails, it's likely because cookies aren't available cross-origin (localhost -> Railway)
+      // Continue with existing token - it might still be valid
       if (refreshError.response?.status === 401 || refreshError.response?.status === 403) {
-        console.error("[PlayPage] Token refresh failed, user may need to log in again");
-        console.error("[PlayPage] Refresh error details:", refreshError.response?.data);
-        alert("Your session has expired. Please log in again.");
-        router.push("/auth/login");
-        setMatching(false);
-        return;
+        console.warn("[PlayPage] Token refresh failed - refresh token cookie not available (cross-origin). Using existing token.");
+        console.warn("[PlayPage] If WebSocket connection fails, please log in again from localhost to get a fresh token.");
+        // Don't redirect - try with existing token first
+      } else {
+        console.warn("[PlayPage] Token refresh failed (non-critical), using existing token");
       }
-      // Otherwise, try with existing token (might still work)
-      console.warn("[PlayPage] Token refresh failed (non-critical), using existing token");
     }
 
     // Ensure token exists after potential refresh
@@ -177,11 +187,25 @@ export default function PlayPage() {
     const authToken = token;
     
     // Connect to WebSocket (using configurable URL)
-    const ws = io(`${WS_URL}/ws`, {
-      auth: { token: authToken },
-      transports: ["websocket"],
+    // Socket.IO namespace /ws is configured on the backend
+    // Socket.IO client automatically uses /socket.io/ path and joins the /ws namespace
+    // For Railway: wss://omegle-gameapi-production.up.railway.app
+    // Connection: wss://omegle-gameapi-production.up.railway.app/socket.io/?ns=/ws
+    const wsUrl = WS_URL.replace(/\/$/, ''); // Remove trailing slash if present
+    
+    // Log token info for debugging (first 20 chars only)
+    console.log(`[PlayPage] Connecting to WebSocket with token: ${authToken ? authToken.substring(0, 20) + '...' : 'MISSING'}`);
+    
+    const ws = io(`${wsUrl}/ws`, {
+      path: '/socket.io', // Explicitly set Socket.IO path (default, but explicit is better)
+      transports: ["websocket", "polling"], // Allow polling fallback for initial handshake
       reconnection: false, // Disable auto-reconnect to handle token refresh manually
-      timeout: 10000
+      timeout: 10000,
+      withCredentials: true, // Include cookies for authentication
+      auth: { token: authToken }, // Send token in auth object (primary method)
+      query: { token: authToken }, // Also send token in query string as fallback
+      // Note: extraHeaders doesn't work reliably for WebSocket connections in Socket.IO
+      forceNew: true // Force a new connection (don't reuse existing)
     });
 
     ws.on("connect", () => {
@@ -244,7 +268,17 @@ export default function PlayPage() {
         clearInterval(matchDurationIntervalRef.current);
         matchDurationIntervalRef.current = null;
       }
-      const errorMsg = err.message || "Matchmaking failed. Please check your subscription and verification status.";
+      const errorMsg = err.message || err.data?.message || "Matchmaking failed. Please check your subscription and verification status.";
+      
+      // Don't show alert for Agora-related errors - these are non-critical
+      // Matchmaking and games can work without video
+      if (errorMsg.includes("Agora") || errorMsg.includes("AGORA_APP_ID") || errorMsg.includes("AGORA_APP_CERTIFICATE")) {
+        console.warn("⚠️ Video setup failed (Agora not configured) - matchmaking will continue without video");
+        // Don't show alert, don't stop matching - just continue
+        return;
+      }
+      
+      // For other errors, show alert and stop matching
       alert(errorMsg);
       setMatching(false);
       setMatchingDuration(0);
@@ -253,16 +287,21 @@ export default function PlayPage() {
 
     ws.on("connect_error", async (err: any) => {
       console.error("[PlayPage] WebSocket connection error:", err.message, err);
+      console.error("[PlayPage] Error type:", err.type);
+      console.error("[PlayPage] Error data:", err.data);
       
-      // Check if this is a WebSocket connection failure (common in serverless environments)
-      const isWebSocketError = err.message?.includes("websocket") || 
-                               err.message?.includes("TransportError") ||
-                               err.type === "TransportError" ||
-                               err.message?.includes("ECONNREFUSED") ||
-                               err.message?.includes("Failed to fetch");
+      // Check if it's an authentication error (most common issue)
+      const isAuthError = err.message?.includes("token") || 
+                         err.message?.includes("Unauthorized") || 
+                         err.message?.includes("expired") ||
+                         err.message?.includes("Invalid") ||
+                         err.data?.message?.includes("token") ||
+                         err.data?.message?.includes("Unauthorized");
       
-      if (isWebSocketError) {
-        console.error("[PlayPage] WebSocket connection failed - WebSockets may not be supported in this environment");
+      if (isAuthError) {
+        console.error("[PlayPage] Authentication error detected. Token may be expired or invalid.");
+        console.error("[PlayPage] Current token (first 20 chars):", authToken ? authToken.substring(0, 20) + '...' : 'MISSING');
+        
         // Clear timeouts and intervals
         if (matchTimeoutRef.current) {
           clearTimeout(matchTimeoutRef.current);
@@ -277,12 +316,62 @@ export default function PlayPage() {
         ws.disconnect();
         setSocket(null);
         
-        // Show user-friendly error message
         alert(
-          "WebSocket connection failed. " +
-          "WebSockets require persistent connections and are not supported in serverless environments like Vercel. " +
-          "For real-time matchmaking, you'll need to deploy the backend to a platform that supports WebSockets (e.g., Railway, Render, or a VPS)."
+          "WebSocket authentication failed. Your session may have expired.\n\n" +
+          "Please log in again from localhost to get a fresh token."
         );
+        router.push("/auth/login");
+        setReconnectAttempts(0);
+        return;
+      }
+      
+      // Check if this is a WebSocket connection failure (common in serverless environments)
+      const isWebSocketError = err.message?.includes("websocket") || 
+                               err.message?.includes("TransportError") ||
+                               err.type === "TransportError" ||
+                               err.message?.includes("ECONNREFUSED") ||
+                               err.message?.includes("Failed to fetch");
+      
+      if (isWebSocketError) {
+        // Check if connecting to Railway (which supports WebSockets)
+        const isRailway = WS_URL.includes('railway.app');
+        
+        // Clear timeouts and intervals
+        if (matchTimeoutRef.current) {
+          clearTimeout(matchTimeoutRef.current);
+          matchTimeoutRef.current = null;
+        }
+        if (matchDurationIntervalRef.current) {
+          clearInterval(matchDurationIntervalRef.current);
+          matchDurationIntervalRef.current = null;
+        }
+        setMatching(false);
+        setMatchingDuration(0);
+        ws.disconnect();
+        setSocket(null);
+        
+        if (isRailway) {
+          // Railway supports WebSockets, so this is likely a CORS issue
+          console.error("[PlayPage] WebSocket connection to Railway failed. This might be a CORS issue.");
+          console.error("[PlayPage] Error details:", err.message, err);
+          
+          alert(
+            "WebSocket connection to Railway failed.\n\n" +
+            "Possible causes:\n" +
+            "- Authentication token expired (try logging in again)\n" +
+            "- CORS configuration issue\n" +
+            "- Network connectivity issue\n\n" +
+            "Please check Railway logs for more details."
+          );
+        } else {
+          // Not Railway - probably Vercel or other serverless
+          console.error("[PlayPage] WebSocket connection failed - WebSockets may not be supported in this environment");
+          alert(
+            "WebSocket connection failed. " +
+            "WebSockets require persistent connections and are not supported in serverless environments like Vercel. " +
+            "For real-time matchmaking, you'll need to deploy the backend to a platform that supports WebSockets (e.g., Railway, Render, or a VPS)."
+          );
+        }
         return;
       }
       
