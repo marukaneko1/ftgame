@@ -22,7 +22,7 @@ const WS_URL = getWebSocketUrl();
 interface SessionData {
   sessionId: string;
   peer: { id: string };
-  video: { channelName: string; token: string; expiresAt?: string };
+  video: { channelName: string; token: string; expiresAt?: string } | null;
 }
 
 interface RemoteUserInfo {
@@ -209,6 +209,12 @@ export default function SessionPage() {
       if (!sessionData?.video && !userId) {
         // Silently wait - will initialize once both are available
       }
+      return;
+    }
+
+    // If video is null (Agora not configured), skip video initialization
+    if (!sessionData.video) {
+      console.log("Video not available (Agora not configured) - continuing without video");
       return;
     }
 
@@ -845,8 +851,8 @@ export default function SessionPage() {
           }
         });
         
-        // Token renewal setup (5 minutes before expiry)
-        if (sessionData.video.expiresAt) {
+        // Token renewal setup (5 minutes before expiry) - only if video is available
+        if (sessionData.video?.expiresAt) {
           const expiresAt = new Date(sessionData.video.expiresAt).getTime();
           const now = Date.now();
           const renewIn = expiresAt - now - (5 * 60 * 1000); // 5 min before expiry
@@ -904,6 +910,8 @@ export default function SessionPage() {
         }
         if (sessionData?.video?.channelName) {
           console.error("Channel:", sessionData.video.channelName);
+        } else {
+          console.warn("Video data not available (may be null due to missing Agora config)");
         }
       }
     };
@@ -1798,8 +1806,8 @@ export default function SessionPage() {
             <p className="text-sm text-gray-400 mb-2">Session Info</p>
             <div className="text-xs text-gray-500 space-y-1">
               <p>Peer: {sessionData?.peer.id || "Loading..."}</p>
-              <p>Channel: {sessionData?.video.channelName || "Loading..."}</p>
-              {sessionData?.video.expiresAt && (
+              <p>Channel: {sessionData?.video?.channelName || "Video not available (Agora not configured)"}</p>
+              {sessionData?.video?.expiresAt && (
                 <p>Token expires: {new Date(sessionData.video.expiresAt).toLocaleTimeString()}</p>
               )}
             </div>
