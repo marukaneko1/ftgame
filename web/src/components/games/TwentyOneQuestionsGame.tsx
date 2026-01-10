@@ -91,8 +91,13 @@ export default function TwentyOneQuestionsGame({
       if (data.gameId === gameId) {
         console.log("TwentyOneQuestionsGame: Player ready", data);
         setGameState(data.state);
+        // Update ready state from the server state
         setIsReady(data.state.playerReady?.[odUserId] || false);
-        setWaitingForOpponent(!data.allReady && data.playerId !== odUserId);
+        // Only show waiting message if I'm ready and opponent isn't
+        setWaitingForOpponent(
+          (data.state.playerReady?.[odUserId] || false) && 
+          !data.allReady
+        );
       }
     };
 
@@ -106,7 +111,8 @@ export default function TwentyOneQuestionsGame({
       if (data.gameId === gameId) {
         console.log("TwentyOneQuestionsGame: Next question", data);
         setGameState(data.state);
-        setIsReady(false);
+        // Reset ready state - both players should be false after question advances
+        setIsReady(data.state.playerReady?.[odUserId] || false);
         setWaitingForOpponent(false);
       }
     };
@@ -203,8 +209,8 @@ export default function TwentyOneQuestionsGame({
             {gameState.currentQuestion}
           </p>
           
-          {waitingForOpponent && !isOpponentReady && (
-            <div className="mt-4">
+          {isReady && !isOpponentReady && (
+            <div className="mt-4 mb-4">
               <p className="text-gray-400 text-sm mb-2">You're ready! Waiting for {opponent?.displayName || "opponent"}...</p>
               <div className="flex justify-center">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
@@ -212,18 +218,22 @@ export default function TwentyOneQuestionsGame({
             </div>
           )}
 
-          {!isReady && !waitingForOpponent && (
-            <button
-              onClick={handleNext}
-              className="mt-4 bg-white px-8 py-3 text-black font-semibold hover:bg-gray-200 border-2 border-white rounded-lg transition-colors"
-            >
-              Next Question
-            </button>
+          {isReady && isOpponentReady && (
+            <p className="text-green-400 mt-4 mb-4 text-sm">Both players ready! Moving to next question...</p>
           )}
 
-          {isReady && isOpponentReady && (
-            <p className="text-green-400 mt-4 text-sm">Both players ready! Moving to next question...</p>
-          )}
+          {/* Always show the button, but disable it when user has clicked */}
+          <button
+            onClick={handleNext}
+            disabled={isReady}
+            className={`mt-4 px-8 py-3 font-semibold border-2 rounded-lg transition-colors ${
+              isReady
+                ? "bg-gray-600 text-gray-300 cursor-not-allowed border-gray-500"
+                : "bg-white text-black hover:bg-gray-200 border-white"
+            }`}
+          >
+            {isReady ? "Waiting for opponent..." : "Next Question"}
+          </button>
         </div>
       </div>
 
