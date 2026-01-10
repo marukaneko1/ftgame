@@ -7,6 +7,7 @@ export * from "./poker-action.dto";
 export * from "./billiards-action.dto";
 export * from "./trivia-action.dto";
 export * from "./truths-and-lie.dto";
+export * from "./twenty-one-questions.dto";
 
 
 

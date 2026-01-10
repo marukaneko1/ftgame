@@ -12,12 +12,14 @@ import { BilliardsModule } from "./billiards/billiards.module";
 import { BilliardsService } from "./billiards/billiards.service";
 import { PokerModule } from "./poker/poker.module";
 import { PokerService } from "./poker/poker.service";
+import { TwentyOneQuestionsModule } from "./twenty-one-questions/twenty-one-questions.module";
+import { TwentyOneQuestionsService } from "./twenty-one-questions/twenty-one-questions.service";
 import { PrismaModule } from "../../prisma/prisma.module";
 
 @Module({
-  imports: [PrismaModule, TicTacToeModule, ChessModule, TriviaModule, TruthsAndLieModule, BilliardsModule, PokerModule],
-  providers: [GamesService, TicTacToeService, ChessService, TriviaService, TruthsAndLieService, BilliardsService, PokerService],
-  exports: [GamesService, TicTacToeService, ChessService, TriviaService, TruthsAndLieService, BilliardsService, PokerService]
+  imports: [PrismaModule, TicTacToeModule, ChessModule, TriviaModule, TruthsAndLieModule, BilliardsModule, PokerModule, TwentyOneQuestionsModule],
+  providers: [GamesService, TicTacToeService, ChessService, TriviaService, TruthsAndLieService, BilliardsService, PokerService, TwentyOneQuestionsService],
+  exports: [GamesService, TicTacToeService, ChessService, TriviaService, TruthsAndLieService, BilliardsService, PokerService, TwentyOneQuestionsService]
 })
 export class GamesModule {}
 

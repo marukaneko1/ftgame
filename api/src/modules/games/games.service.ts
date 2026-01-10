@@ -7,6 +7,7 @@ import { TriviaService } from "./trivia/trivia.service";
 import { TruthsAndLieService } from "./truths-and-lie/truths-and-lie.service";
 import { BilliardsService } from "./billiards/billiards.service";
 import { PokerService } from "./poker/poker.service";
+import { TwentyOneQuestionsService } from "./twenty-one-questions/twenty-one-questions.service";
 
 @Injectable()
 export class GamesService {
@@ -17,7 +18,8 @@ export class GamesService {
     private readonly triviaService: TriviaService,
     private readonly truthsAndLieService: TruthsAndLieService,
     private readonly billiardsService: BilliardsService,
-    private readonly pokerService: PokerService
+    private readonly pokerService: PokerService,
+    private readonly twentyOneQuestionsService: TwentyOneQuestionsService
   ) {}
 
   async createGame(sessionId: string, type: GameType, playerIds: string[]) {
@@ -51,6 +53,12 @@ export class GamesService {
       }));
     } else if (type === GameType.POKER) {
       // For poker, use player1/player2 as sides
+      sideMappings = playerIds.map((userId, idx) => ({
+        userId,
+        side: `player${idx + 1}`
+      }));
+    } else if (type === GameType.TWENTY_ONE_QUESTIONS) {
+      // For 21 Questions, use player1/player2 as sides
       sideMappings = playerIds.map((userId, idx) => ({
         userId,
         side: `player${idx + 1}`
@@ -146,6 +154,11 @@ export class GamesService {
       state = this.pokerService.initializeState(gameId, playerIds);
       // Store state in poker service
       this.pokerService.setState(gameId, state);
+    } else if (game.type === GameType.TWENTY_ONE_QUESTIONS) {
+      const playerIds = game.players.map(p => p.userId);
+      state = this.twentyOneQuestionsService.initializeState(gameId, playerIds);
+      // Store state in twenty-one-questions service
+      this.twentyOneQuestionsService.setState(gameId, state);
     }
 
     // Update game to active with initial state

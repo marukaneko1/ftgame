@@ -48,6 +48,7 @@ enum GameType {
   TRUTHS_AND_LIE
   BILLIARDS
   POKER
+  TWENTY_ONE_QUESTIONS
 }
 
 enum GameStatus {

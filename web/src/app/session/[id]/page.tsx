@@ -11,6 +11,7 @@ import TriviaGame from "@/components/games/TriviaGame";
 import TruthsAndLieGame from "@/components/games/TruthsAndLieGame";
 import BilliardsGameV2 from "@/components/games/BilliardsGameV2";
 import PokerGame from "@/components/games/PokerGame";
+import TwentyOneQuestionsGame from "@/components/games/TwentyOneQuestionsGame";
 import BackButton from "@/components/BackButton";
 
 // Configurable WebSocket URL
@@ -1743,6 +1744,23 @@ export default function SessionPage() {
                 }
               }}
             />
+          ) : gameType && gameId && (gameType === "TWENTY_ONE_QUESTIONS" || gameType?.toUpperCase() === "TWENTY_ONE_QUESTIONS") ? (
+            <TwentyOneQuestionsGame
+              gameId={gameId}
+              socket={socket!}
+              odUserId={userId}
+              initialState={gameState || undefined}
+              initialPlayers={gamePlayers}
+              onGameEnd={(result) => {
+                console.log("21 Questions game ended:", result);
+                setTimeout(() => {
+                  setGameType(null);
+                  setGameId(null);
+                  setGameState(null);
+                  setGamePlayers([]);
+                }, 5000);
+              }}
+            />
           ) : gameType && !gameId ? (
             // Game is pending/starting - show cancel option
             <div className="bg-gray-800 p-4 border border-white/20">
@@ -1762,7 +1780,7 @@ export default function SessionPage() {
                 </div>
               </div>
             </div>
-          ) : gameType && gameId && gameType !== "TICTACTOE" && gameType !== "TRIVIA" && gameType !== "CHESS" && gameType !== "TRUTHS_AND_LIE" && gameType?.toUpperCase() !== "TRUTHS_AND_LIE" && gameType !== "BILLIARDS" && gameType?.toUpperCase() !== "BILLIARDS" && gameType !== "POKER" && gameType?.toUpperCase() !== "POKER" ? (
+          ) : gameType && gameId && gameType !== "TICTACTOE" && gameType !== "TRIVIA" && gameType !== "CHESS" && gameType !== "TRUTHS_AND_LIE" && gameType?.toUpperCase() !== "TRUTHS_AND_LIE" && gameType !== "BILLIARDS" && gameType?.toUpperCase() !== "BILLIARDS" && gameType !== "POKER" && gameType?.toUpperCase() !== "POKER" && gameType !== "TWENTY_ONE_QUESTIONS" && gameType?.toUpperCase() !== "TWENTY_ONE_QUESTIONS" ? (
             <div className="bg-gray-800 p-4 border border-white/20">
               <p className="text-sm text-gray-300 mb-2">Active game: {gameType} (ID: {gameId})</p>
               <div className="bg-black p-8 text-center text-gray-400 min-h-[200px] flex items-center justify-center">
@@ -1817,6 +1835,12 @@ export default function SessionPage() {
                   className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
                 >
                   Poker
+                </button>
+                <button
+                  onClick={() => handleStartGame("TWENTY_ONE_QUESTIONS")}
+                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                >
+                  21 Questions
                 </button>
               </div>
             </div>

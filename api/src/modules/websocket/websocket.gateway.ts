@@ -21,6 +21,7 @@ import { TriviaService } from "../games/trivia/trivia.service";
 import { TruthsAndLieService } from "../games/truths-and-lie/truths-and-lie.service";
 import { BilliardsService } from "../games/billiards/billiards.service";
 import { PokerService } from "../games/poker/poker.service";
+import { TwentyOneQuestionsService } from "../games/twenty-one-questions/twenty-one-questions.service";
 import { VideoService } from "../video/video.service";
 import { WalletService } from "../wallet/wallet.service";
 import { ReportsService } from "../reports/reports.service";
@@ -42,7 +43,8 @@ import {
   TriviaSelectThemeDto,
   TriviaAnswerDto,
   TruthsAndLieSubmitStatementsDto,
-  TruthsAndLieSubmitGuessDto
+  TruthsAndLieSubmitGuessDto,
+  TwentyOneQuestionsNextDto
 } from "./dto";
 
 // SECURITY: Dynamic CORS based on environment - DO NOT use origin: "*" in production
@@ -97,6 +99,7 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
     private readonly truthsAndLieService: TruthsAndLieService,
     private readonly billiardsService: BilliardsService,
     private readonly pokerService: PokerService,
+    private readonly twentyOneQuestionsService: TwentyOneQuestionsService,
     private readonly videoService: VideoService,
     private readonly walletService: WalletService,
     private readonly reportsService: ReportsService,
@@ -472,6 +475,12 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
         const pokerState = this.pokerService.getState(startedGame.id);
         if (pokerState) {
           finalState = pokerState as any;
+        }
+      } else if (startedGame.type === GameType.TWENTY_ONE_QUESTIONS && finalState) {
+        // Ensure twenty-one-questions state is properly set
+        const questionsState = this.twentyOneQuestionsService.getState(startedGame.id);
+        if (questionsState) {
+          finalState = questionsState as any;
         }
       }
       
@@ -1650,6 +1659,89 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
     } catch (error: any) {
       this.logger.error("Submit guess error:", error);
       client.emit("game.error", { message: error.message || "Failed to submit guess" });
+    }
+  }
+
+  // ==================== 21 QUESTIONS GAME ====================
+
+  @UseGuards(WsJwtGuard)
+  @UsePipes(new ValidationPipe({ 
+    whitelist: true, 
+    forbidNonWhitelisted: true,
+    transform: true,
+    exceptionFactory: (errors) => new WsException(errors)
+  }))
+  @SubscribeMessage("twentyOneQuestions.next")
+  async handleNextQuestion(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: TwentyOneQuestionsNextDto
+  ) {
+    const user = (client as any).user;
+
+    try {
+      const game = await this.gamesService.getGame(body.gameId);
+      if (game.type !== GameType.TWENTY_ONE_QUESTIONS) {
+        client.emit("game.error", { message: "Not a 21 Questions game" });
+        return;
+      }
+
+      // SECURITY: Verify user is a player in this game
+      this.assertPlayerInGame(game, user.sub);
+
+      // Mark player as ready for next question
+      const result = this.twentyOneQuestionsService.markPlayerReady(
+        body.gameId,
+        user.sub
+      );
+
+      // Get session ID from game
+      const sessionId = game.sessionId;
+      const roomKey = sessionId ? `session:${sessionId}` : `game:${body.gameId}`;
+
+      // Update state in database
+      await (this.gamesService as any).prisma.game.update({
+        where: { id: body.gameId },
+        data: { state: result.state as any }
+      });
+
+      // Emit player ready status
+      this.server.to(roomKey).emit("twentyOneQuestions.playerReady", {
+        gameId: body.gameId,
+        playerId: user.sub,
+        allReady: result.allReady,
+        state: result.state
+      });
+
+      // If all players are ready, emit next question
+      if (result.allReady) {
+        if (result.state.phase === "gameEnd") {
+          // Game completed
+          this.server.to(roomKey).emit("twentyOneQuestions.gameEnd", {
+            gameId: body.gameId,
+            completedQuestions: result.state.completedQuestions,
+            totalQuestions: result.state.totalQuestions,
+            state: result.state
+          });
+        } else if (result.nextQuestion) {
+          // Next question available
+          this.server.to(roomKey).emit("twentyOneQuestions.nextQuestion", {
+            gameId: body.gameId,
+            question: result.nextQuestion,
+            questionNumber: result.state.currentQuestionIndex + 1,
+            totalQuestions: result.state.totalQuestions,
+            state: result.state
+          });
+        }
+      }
+
+      // Also emit state update for UI sync
+      this.server.to(roomKey).emit("game.stateUpdate", {
+        gameId: body.gameId,
+        state: result.state
+      });
+    } catch (error: any) {
+      this.logger.error("Next question error:", error);
+      client.emit("game.error", { message: error.message || "Failed to proceed to next question" });
     }
   }
 
