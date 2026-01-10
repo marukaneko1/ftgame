@@ -346,11 +346,22 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
         }
       }
       
+      // Emit session.ready to the joining client
       client.emit("session.ready", {
         sessionId: session.id,
         peer: { id: peerId },
         video: videoToken
       });
+      
+      // Notify the peer that this user has joined the session
+      // This ensures both users know when the other is ready
+      this.server.to(`session:${body.sessionId}`).emit("session.peerJoined", {
+        sessionId: session.id,
+        userId: user.sub,
+        peerId: peerId
+      });
+      
+      this.logger.log(`User ${user.sub} joined session ${body.sessionId}, peer: ${peerId}`);
     } catch (error: any) {
       this.logger.error("Error in session.join:", error);
       // Don't send Agora-related errors to client - they're non-critical
