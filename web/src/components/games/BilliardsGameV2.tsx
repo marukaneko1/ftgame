@@ -33,28 +33,10 @@ export default function BilliardsGameV2({
   useEffect(() => {
     if (typeof window === "undefined" || initCompleteRef.current) return;
 
-    // Wait for canvas to be available with retry mechanism
-    const checkCanvasAndInit = () => {
-      if (!canvasRef.current) {
-        retryCountRef.current++;
-        if (retryCountRef.current < MAX_RETRIES) {
-          console.log(`[BilliardsGameV2] Canvas ref not ready, retry ${retryCountRef.current}/${MAX_RETRIES}...`);
-          setTimeout(checkCanvasAndInit, 200);
-          return;
-        } else {
-          console.error("[BilliardsGameV2] Canvas ref not available after max retries");
-          setError("Canvas element not found. Please refresh the page.");
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      // Canvas is ready, proceed with initialization
-      console.log("[BilliardsGameV2] Canvas ref is ready, starting initialization...");
-
     let container: any = null;
     let animationFrameId: number | null = null;
     let remoteEventHandler: ((data: any) => void) | null = null;
+    let retryTimeout: NodeJS.Timeout | null = null;
 
     const init = async () => {
       try {
@@ -207,10 +189,34 @@ export default function BilliardsGameV2({
       }
     };
 
+    // Wait for canvas to be available with retry mechanism
+    const checkCanvasAndInit = () => {
+      if (!canvasRef.current) {
+        retryCountRef.current++;
+        if (retryCountRef.current < MAX_RETRIES) {
+          console.log(`[BilliardsGameV2] Canvas ref not ready, retry ${retryCountRef.current}/${MAX_RETRIES}...`);
+          retryTimeout = setTimeout(checkCanvasAndInit, 200);
+          return;
+        } else {
+          console.error("[BilliardsGameV2] Canvas ref not available after max retries");
+          setError("Canvas element not found. Please refresh the page.");
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // Canvas is ready, proceed with initialization
+      console.log("[BilliardsGameV2] Canvas ref is ready, starting initialization...");
+      init();
+    };
+
     // Start checking for canvas
     checkCanvasAndInit();
 
     return () => {
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+      }
       if (remoteEventHandler) {
         socket.off("billiards.event", remoteEventHandler);
       }
@@ -223,6 +229,7 @@ export default function BilliardsGameV2({
       }
       container = null;
       initCompleteRef.current = false;
+      retryCountRef.current = 0; // Reset retry count
     };
 
   }, [gameId, socket, odUserId, initialState]);
