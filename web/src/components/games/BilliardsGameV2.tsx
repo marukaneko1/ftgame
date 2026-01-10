@@ -242,25 +242,31 @@ export default function BilliardsGameV2({
     );
   }
 
-  if (isLoading) {
-    return (
-      <div className="bg-gray-900 rounded-lg border border-white/20 p-6">
-        <p className="text-gray-400">Loading billiards game...</p>
-      </div>
-    );
-  }
-
   return (
     <div className="bg-gray-900 rounded-lg border border-white/20 p-6">
       <div className="mb-4">
         <h2 className="text-2xl font-bold text-white mb-2">8-Ball Pool</h2>
+        {isLoading && (
+          <p className="text-gray-400 text-sm">Loading billiards game...</p>
+        )}
+        {error && (
+          <p className="text-red-400 text-sm">Error: {error}</p>
+        )}
       </div>
       <div className="relative w-full" style={{ aspectRatio: '2/1' }}>
         <canvas
           ref={canvasRef}
           className="w-full h-full"
-          style={{ display: 'block' }}
+          style={{ display: 'block', backgroundColor: '#0d5d2a' }}
         />
+        {isLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
+              <p className="text-white text-sm">Initializing game...</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
