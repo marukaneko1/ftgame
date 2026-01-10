@@ -6,6 +6,43 @@ import express, { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
 import { raw } from 'express';
 import { ValidationPipe } from '@nestjs/common';
+import { config } from 'dotenv';
+import { resolve } from 'path';
+import { existsSync } from 'fs';
+
+// CRITICAL: Load environment variables for local Vercel simulation
+// Load .env first, then .env.local (which overrides .env)
+// This ensures .env.local (with remote database) takes precedence
+// When running `vercel dev` from api/, process.cwd() is the api/ directory
+const cwd = process.cwd();
+const envPath = resolve(cwd, '.env');
+const envLocalPath = resolve(cwd, '.env.local');
+
+console.log('[Serverless] process.cwd():', cwd);
+console.log('[Serverless] Looking for .env.local at:', envLocalPath);
+console.log('[Serverless] .env.local exists:', existsSync(envLocalPath));
+
+// Load .env first
+try {
+  config({ path: envPath });
+  console.log('[Serverless] Loaded .env from:', envPath);
+} catch (error) {
+  console.warn('[Serverless] Could not load .env:', error);
+}
+
+// Load .env.local second (overwrites .env values)
+// This is critical - it ensures local Vercel simulation uses remote database
+try {
+  const result = config({ path: envLocalPath, override: true });
+  if (!result.error) {
+    console.log('[Serverless] Loaded .env.local from:', envLocalPath);
+    console.log('[Serverless] DATABASE_URL:', process.env.DATABASE_URL?.substring(0, 60) + '...');
+  } else {
+    console.warn('[Serverless] Could not load .env.local:', result.error);
+  }
+} catch (error) {
+  console.warn('[Serverless] Error loading .env.local:', error);
+}
 
 // Mark as serverless environment
 process.env.IS_SERVERLESS = 'true';
@@ -164,6 +201,21 @@ export default async function handler(req: Request, res: Response) {
       });
     }
 
+    // Debug endpoint to check environment variables (only in development)
+    if (req.url === '/api/debug/env' && (process.env.NODE_ENV === 'development' || process.env.VERCEL_ENV === 'development')) {
+      return res.status(200).json({
+        cwd: process.cwd(),
+        databaseUrlSet: !!process.env.DATABASE_URL,
+        databaseUrlPrefix: process.env.DATABASE_URL ? process.env.DATABASE_URL.substring(0, 50) + '...' : 'NOT SET',
+        redisUrlSet: !!process.env.REDIS_URL,
+        jwtAccessSecretSet: !!process.env.JWT_ACCESS_SECRET,
+        allowedOrigins: process.env.ALLOWED_ORIGINS,
+        isServerless: process.env.IS_SERVERLESS,
+        nodeEnv: process.env.NODE_ENV,
+        vercelEnv: process.env.VERCEL_ENV
+      });
+    }
+
     // Vercel rewrite sends /api/auth/register to this function as /api/auth/register
     // NestJS with setGlobalPrefix('api') expects /api/auth/register
     // Routes match directly - no path manipulation needed
@@ -175,24 +227,36 @@ export default async function handler(req: Request, res: Response) {
     } catch (nestError: any) {
       // NestJS threw an error - ensure CORS headers are still set
       setCorsHeaders(res, origin);
-      console.error('NestJS handler error:', nestError);
-      console.error('Error message:', nestError?.message);
-      console.error('Error stack:', nestError?.stack);
+      console.error('[Serverless] NestJS handler error:', nestError);
+      console.error('[Serverless] Error name:', nestError?.name);
+      console.error('[Serverless] Error message:', nestError?.message);
+      console.error('[Serverless] Error code:', nestError?.code);
+      console.error('[Serverless] Error stack:', nestError?.stack);
+      
+      // Log environment info for debugging
+      console.error('[Serverless] DATABASE_URL:', process.env.DATABASE_URL ? process.env.DATABASE_URL.substring(0, 50) + '...' : 'NOT SET');
+      console.error('[Serverless] REDIS_URL:', process.env.REDIS_URL ? 'SET' : 'NOT SET');
       
       // If response hasn't been sent yet, send error response
       if (!res.headersSent) {
-        // In production, don't expose stack traces but log them
-        const isProd = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
+        // Always show error details in development/local
+        const isDev = process.env.NODE_ENV === 'development' || process.env.VERCEL_ENV === 'development';
         
         res.status(500).json({ 
           error: 'Internal Server Error', 
           message: nestError?.message || 'Unknown error',
-          // Only show stack in development
-          stack: !isProd ? nestError?.stack : undefined,
-          // In production, show error type/name for debugging
           errorType: nestError?.name || 'Error',
+          errorCode: nestError?.code,
+          // Show stack in development/local
+          stack: isDev ? nestError?.stack : undefined,
           // Show if it's a validation error
-          isValidationError: nestError?.response?.statusCode === 400
+          isValidationError: nestError?.response?.statusCode === 400,
+          // Additional debug info in development
+          ...(isDev && {
+            cause: nestError?.cause,
+            databaseUrlSet: !!process.env.DATABASE_URL,
+            redisUrlSet: !!process.env.REDIS_URL
+          })
         });
       }
     }

@@ -27,3 +27,4 @@ export class TruthsAndLieSubmitGuessDto {
   selectedIndex!: number;
 }
 
+

@@ -188,3 +188,4 @@ vercel dev --listen 3003  # for Web
 2. **Pre-deploy Testing**: Use `npm run dev:vercel` to test Vercel-specific behavior
 3. **Production**: Deploy to Vercel for final testing
 
+
