@@ -10,7 +10,6 @@ import ChessGame from "@/components/games/ChessGame";
 import TriviaGame from "@/components/games/TriviaGame";
 import TruthsAndLieGame from "@/components/games/TruthsAndLieGame";
 import BilliardsGame from "@/components/games/BilliardsGame";
-import BilliardsGameV2 from "@/components/games/BilliardsGameV2";
 import PokerGame from "@/components/games/PokerGame";
 import BackButton from "@/components/BackButton";
 
