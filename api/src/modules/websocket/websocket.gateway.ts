@@ -129,7 +129,18 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
         clearInterval(interval);
         this.matchingIntervals.delete(userId);
       }
-      this.matchmakingService.leaveQueue(userId);
+      // Note: leaveQueue is also called in client.once("disconnect") handler
+      // We'll let that handle it to avoid duplicate calls
+      // Only call here if we're sure the client.once handler won't fire
+      // Actually, handleDisconnect is called for ALL disconnects, so we should call it
+      // But the client.once handler will also fire, causing duplicate calls
+      // Let's add a small delay to see if user reconnects before removing from queue
+      setTimeout(() => {
+        // Only remove if user hasn't reconnected (check if interval still exists)
+        if (!this.matchingIntervals.has(userId)) {
+          this.matchmakingService.leaveQueue(userId);
+        }
+      }, 1000); // Wait 1 second before removing - gives time for reconnection
     }
   }
 
