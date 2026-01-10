@@ -954,37 +954,53 @@ export default function SessionPage() {
   }, [sessionData, userId, sessionId]);
 
   useEffect(() => {
+    // Get token from localStorage - this is the source of truth
     let token: string | null = localStorage.getItem("accessToken");
     if (!token) {
+      console.warn("[SessionPage] No token found in localStorage, redirecting to login");
       router.push("/auth/login");
       return;
     }
 
     // Try to refresh token before connecting (in case it's expired)
-    const refreshToken = async () => {
+    // But don't fail if refresh doesn't work - use existing token for WebSocket
+    const refreshToken = async (): Promise<string | null> => {
       try {
         const refreshResponse = await api.post("/auth/refresh", {});
         if (refreshResponse.data?.accessToken) {
-          token = refreshResponse.data.accessToken as string;
-          localStorage.setItem("accessToken", token);
+          const newToken = refreshResponse.data.accessToken as string;
+          localStorage.setItem("accessToken", newToken);
           console.log("[SessionPage] Token refreshed before WebSocket connection");
+          return newToken;
         }
+        return token; // Return existing token if refresh response has no token
       } catch (refreshError: any) {
+        // Don't redirect if refresh fails - cross-origin cookies might not work
+        // The existing token might still be valid for WebSocket connections
         if (refreshError.response?.status === 401 || refreshError.response?.status === 403) {
-          console.error("[SessionPage] Token refresh failed, user may need to log in again");
-          router.push("/auth/login");
-          return;
+          console.warn("[SessionPage] Token refresh failed (likely cross-origin cookie issue) - continuing with existing token");
+          // Return existing token - don't fail
+          return token;
+        } else {
+          console.warn("[SessionPage] Token refresh failed (non-critical), using existing token");
+          return token;
         }
-        console.warn("[SessionPage] Token refresh failed (non-critical), using existing token");
       }
     };
 
     // Refresh token and then connect
-    refreshToken().then(() => {
-      if (!token) {
+    refreshToken().then((finalToken) => {
+      // Use the token returned from refreshToken (which falls back to original token)
+      const tokenToUse = finalToken || token || localStorage.getItem("accessToken");
+      
+      if (!tokenToUse) {
+        console.error("[SessionPage] No token available after refresh attempt, redirecting to login");
         router.push("/auth/login");
         return;
       }
+      
+      // Update token variable to use the final token
+      token = tokenToUse;
 
       // Connect to WebSocket (using configurable URL)
       // Allow fallback to polling if websocket fails

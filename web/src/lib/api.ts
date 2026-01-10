@@ -94,13 +94,36 @@ api.interceptors.response.use(
         }
       } catch (refreshError: any) {
         processQueue(refreshError, null);
-        // Refresh failed - user needs to log in again
-        localStorage.removeItem("accessToken");
         
-        // Only redirect if we're not already on login/register page
-        if (typeof window !== "undefined" && !window.location.pathname.includes("/auth")) {
-          console.error("[API] Token refresh failed, redirecting to login");
+        // Don't redirect if we're in an active session or on play/matchmaking pages
+        // The existing token might still be valid for WebSocket connections
+        // Only redirect if we're on a regular page and have no token at all
+        const isInSession = typeof window !== "undefined" && window.location.pathname.includes("/session/");
+        const isOnPlayPage = typeof window !== "undefined" && window.location.pathname.includes("/play");
+        const isOnAuthPage = typeof window !== "undefined" && window.location.pathname.includes("/auth");
+        const hasTokenInStorage = typeof window !== "undefined" && !!localStorage.getItem("accessToken");
+        
+        // Only redirect if:
+        // 1. Not in session/play/auth pages
+        // 2. No token in localStorage (truly logged out)
+        // 3. Original request was not a refresh attempt (to avoid redirect loops)
+        const shouldRedirect = !isInSession && 
+                               !isOnPlayPage && 
+                               !isOnAuthPage && 
+                               !hasTokenInStorage &&
+                               !originalRequest.url?.includes("/auth/refresh");
+        
+        if (shouldRedirect) {
+          // Refresh failed and no token - user needs to log in again
+          localStorage.removeItem("accessToken");
+          console.error("[API] Token refresh failed and no token available, redirecting to login");
           window.location.href = "/auth/login";
+        } else {
+          // Don't redirect - token might still be valid for WebSocket or we're in an active flow
+          if (isInSession || isOnPlayPage) {
+            console.warn("[API] Token refresh failed but continuing - token may still be valid for WebSocket");
+          }
+          // Don't remove token - it might still work for WebSocket connections
         }
         return Promise.reject(refreshError);
       } finally {
