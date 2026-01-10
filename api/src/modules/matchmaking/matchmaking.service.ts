@@ -326,16 +326,30 @@ export class MatchmakingService implements OnModuleDestroy {
 
   private async findClosestMatch(userId: string, queueKey: string, userLat?: number, userLon?: number): Promise<[QueueRequest, QueueRequest] | null> {
     const redis = await this.ensureRedis();
-    const length = await redis.llen(queueKey);
-    this.logger.log(`[MATCHMAKING] findClosestMatch for ${userId}, queue: ${queueKey}, length: ${length}`);
+    
+    // Get all users in queue FIRST (before checking length)
+    // This ensures we see all users even if there's a race condition
+    const allItems = await redis.lrange(queueKey, 0, -1);
+    const length = allItems.length;
+    
+    this.logger.log(`[MATCHMAKING] findClosestMatch for ${userId}, queue: ${queueKey}, length: ${length}, items: ${allItems.length}`);
+    
+    // Log all user IDs in queue for debugging
+    const userIdsInQueue: string[] = [];
+    for (const item of allItems) {
+      try {
+        const parsed = JSON.parse(item) as QueueRequest;
+        userIdsInQueue.push(parsed.userId);
+      } catch {
+        // Skip invalid items
+      }
+    }
+    this.logger.debug(`[MATCHMAKING] User IDs in queue: ${userIdsInQueue.join(', ')}`);
+    
     if (length < 2) {
       this.logger.warn(`[MATCHMAKING] Queue too short (${length} < 2) - need at least 2 users to match`);
       return null;
     }
-
-    // Get all users in queue
-    const allItems = await redis.lrange(queueKey, 0, -1);
-    this.logger.log(`[MATCHMAKING] Found ${allItems.length} items in queue ${queueKey}`);
     const queueRequests: Array<{ request: QueueRequest; distance: number }> = [];
     
     for (const item of allItems) {
