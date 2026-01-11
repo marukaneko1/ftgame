@@ -298,6 +298,16 @@ export default function SessionPage() {
 
         console.log("Agora App ID:", appId);
 
+        // Check if video data is available
+        if (!sessionData.video) {
+          console.warn("⚠️ Video session data not available - video features will be disabled");
+          setError("Video session data not available. Matchmaking and games will still work.");
+          if (isMounted) {
+            setVideoReady(false);
+          }
+          return; // Skip video initialization but continue with session
+        }
+
         // Create Agora client
         const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
         clientRef.current = client;
