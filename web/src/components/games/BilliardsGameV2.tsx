@@ -107,15 +107,16 @@ export default function BilliardsGameV2({
         container.broadcast = (event: any) => {
           if (socket && socket.connected) {
             try {
-              // Serialize event for transmission - Socket.IO will handle JSON serialization
-              // We send the serialized JSON string, and Socket.IO will transmit it
+              // Serialize event to JSON string, then parse back to plain object for Socket.IO
+              // Socket.IO will handle JSON serialization, so we send a plain object
               const serialized = EventUtil.serialise(event);
+              const eventObject = JSON.parse(serialized);
               
               socket.emit("billiards.event", {
                 gameId,
-                event: serialized // Send as JSON string, backend will receive it as object after Socket.IO deserializes
+                event: eventObject // Send as plain object (Socket.IO will serialize it)
               });
-              console.log("[BilliardsGameV2] Broadcast event:", event.type || JSON.parse(serialized).type);
+              console.log("[BilliardsGameV2] Broadcast event:", event.type || eventObject.type);
             } catch (err) {
               console.error("[BilliardsGameV2] Error broadcasting event:", err, event);
             }
@@ -128,9 +129,9 @@ export default function BilliardsGameV2({
             try {
               console.log("[BilliardsGameV2] Received remote event:", typeof data.event, data.event);
               
-              // Deserialize event - data.event will be a string (JSON) or already an object
-              // EventUtil.fromSerialised expects a JSON string
-              const eventString = typeof data.event === 'string' ? data.event : JSON.stringify(data.event);
+              // Deserialize event - data.event will be a plain object from Socket.IO
+              // EventUtil.fromSerialised expects a JSON string, so we stringify it
+              const eventString = JSON.stringify(data.event);
               const reconstructedEvent = EventUtil.fromSerialised(eventString);
               
               if (reconstructedEvent) {
