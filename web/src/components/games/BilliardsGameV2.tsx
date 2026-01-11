@@ -139,7 +139,8 @@ export default function BilliardsGameV2({
                 console.log("[BilliardsGameV2] Added event to queue:", reconstructedEvent.type);
                 
                 // Check for game end events (ChatEvent with "Game over" message)
-                if (reconstructedEvent.type === 'CHAT' && reconstructedEvent.message && 
+                if (reconstructedEvent.type === 'CHAT' && 'message' in reconstructedEvent && 
+                    typeof reconstructedEvent.message === 'string' &&
                     reconstructedEvent.message.includes('Game over')) {
                   if (onGameEnd) {
                     onGameEnd({
