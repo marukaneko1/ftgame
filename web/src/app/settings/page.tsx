@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usersApi } from "@/lib/api";
+import { usersApi, subscriptionsApi } from "@/lib/api";
 import BackButton from "@/components/BackButton";
 import { formatNumber } from "@/lib/utils";
 
@@ -13,10 +13,12 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [subscription, setSubscription] = useState<any>(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
   useEffect(() => {
     loadUser();
+    loadSubscription();
   }, []);
 
   const loadUser = async () => {
@@ -29,6 +31,24 @@ export default function SettingsPage() {
       console.error("Failed to load user:", err);
     } finally {
       setLoadingUser(false);
+    }
+  };
+
+  const loadSubscription = async () => {
+    try {
+      const subData = await subscriptionsApi.getMySubscription();
+      setSubscription(subData);
+    } catch (err) {
+      console.error("Failed to load subscription:", err);
+    }
+  };
+
+  const handleUnlockAccess = async () => {
+    try {
+      const { checkoutUrl } = await subscriptionsApi.createBasicCheckout();
+      window.location.href = checkoutUrl;
+    } catch (err: any) {
+      alert(err.response?.data?.message || "Failed to create checkout session");
     }
   };
 
@@ -67,6 +87,44 @@ export default function SettingsPage() {
         </div>
       ) : (
         <>
+          {/* Subscription Section */}
+          <div className="bg-gray-900 p-6 border border-white/20">
+            <h2 className="text-xl font-semibold text-white mb-4">Subscription</h2>
+            {subscription?.status === "ACTIVE" ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-400">Status</p>
+                    <p className="text-lg font-semibold text-green-400 mt-1">Active</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-gray-400">Plan</p>
+                    <p className="text-lg font-semibold text-white mt-1">Basic — $1.99/month</p>
+                  </div>
+                </div>
+                <p className="text-sm text-gray-500">
+                  Your subscription is active. You have full access to matchmaking and rooms.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-gray-400">Status</p>
+                  <p className="text-lg font-semibold text-gray-400 mt-1">Inactive</p>
+                </div>
+                <p className="text-sm text-gray-500">
+                  A subscription is required to play and join rooms.
+                </p>
+                <button
+                  onClick={handleUnlockAccess}
+                  className="bg-white px-4 py-2 font-semibold text-black hover:bg-gray-200 border-2 border-white"
+                >
+                  Subscribe — $1.99/month
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Profile Info Section */}
           <div className="bg-gray-900 p-6 border border-white/20">
             <h2 className="text-xl font-semibold text-white mb-4">Profile Information</h2>
@@ -104,12 +162,6 @@ export default function SettingsPage() {
               <div>
                 <p className="text-sm text-gray-400">KYC Status</p>
                 <p className="mt-1 text-white">{user?.kycStatus || "PENDING"}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-400">Subscription Status</p>
-                <p className={`mt-1 ${user?.subscription?.status === "ACTIVE" ? "text-green-400" : "text-gray-400"}`}>
-                  {user?.subscription?.status || "INACTIVE"}
-                </p>
               </div>
               <div>
                 <p className="text-sm text-gray-400">Account Status</p>

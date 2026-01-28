@@ -69,21 +69,20 @@ export default function DashboardPage() {
         </Link>
       </header>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <div className="bg-gray-900 p-4 border border-white/20">
-          <p className="text-sm text-gray-400">Subscription</p>
-          <p className="mt-2 text-lg font-semibold text-white">
-            {subscription?.status === "ACTIVE" ? "Active" : "Basic access — $1.99"}
-          </p>
-          <p className="text-sm text-gray-500">Required to play and join rooms.</p>
-          <button
-            onClick={handleUnlockAccess}
-            disabled={subscription?.status === "ACTIVE"}
-            className="mt-4 w-full bg-white px-4 py-2 text-black hover:bg-gray-200 border-2 border-white disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {subscription?.status === "ACTIVE" ? "Active" : "Unlock access"}
-          </button>
-        </div>
+      <section className={`grid gap-4 ${subscription?.status === "ACTIVE" ? "md:grid-cols-2" : "md:grid-cols-3"}`}>
+        {subscription?.status !== "ACTIVE" && (
+          <div className="bg-gray-900 p-4 border border-white/20">
+            <p className="text-sm text-gray-400">Subscription</p>
+            <p className="mt-2 text-lg font-semibold text-white">Basic access — $1.99</p>
+            <p className="text-sm text-gray-500">Required to play and join rooms.</p>
+            <button
+              onClick={handleUnlockAccess}
+              className="mt-4 w-full bg-white px-4 py-2 text-black hover:bg-gray-200 border-2 border-white"
+            >
+              Unlock access
+            </button>
+          </div>
+        )}
 
         <div className="bg-gray-900 p-4 border border-white/20">
           <p className="text-sm text-gray-400">Wallet</p>

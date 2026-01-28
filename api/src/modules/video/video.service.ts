@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from "@nestjs/common";
+import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RtcRole, RtcTokenBuilder } from "agora-access-token";
@@ -17,6 +17,18 @@ export class VideoService {
       throw new ForbiddenException("Not a participant in session");
     }
     return this.buildToken(session.videoChannelName, userId);
+  }
+
+  async generateTokenForRoom(roomId: string, userId: string) {
+    const room = await this.prisma.room.findUnique({
+      where: { id: roomId },
+      select: { id: true, videoChannelName: true, participants: { where: { userId, leftAt: null } } }
+    });
+    if (!room) throw new NotFoundException("Room not found");
+    if (room.participants.length === 0) {
+      throw new ForbiddenException("Not a participant in room");
+    }
+    return this.buildToken(room.videoChannelName, userId);
   }
 
   getAppId() {

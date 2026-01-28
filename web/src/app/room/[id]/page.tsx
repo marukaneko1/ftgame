@@ -3,20 +3,41 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { io, Socket } from "socket.io-client";
+import dynamic from "next/dynamic";
 import { roomsApi, walletApi } from "@/lib/api";
 import BackButton from "@/components/BackButton";
 import TicTacToeGame from "@/components/games/TicTacToeGame";
 import ChessGame from "@/components/games/ChessGame";
 
+// Dynamic import for RoomVideo to avoid SSR issues with Agora SDK
+const RoomVideo = dynamic(() => import("@/components/RoomVideo"), { 
+  ssr: false,
+  loading: () => <div className="p-4 text-center text-gray-500 text-sm">Loading video...</div>
+});
+
 import { getWebSocketUrl } from "@/lib/ws-config";
 
 const WS_URL = getWebSocketUrl();
 
-const GAME_TYPES = [
-  { value: "TICTACTOE", label: "🎯 Tic Tac Toe", icon: "🎯" },
-  { value: "CHESS", label: "♟️ Chess", icon: "♟️" },
-  { value: "TRIVIA", label: "🧠 Trivia", icon: "🧠", disabled: true },
-];
+// Game configurations with player limits
+const GAME_CONFIGS: Record<string, { label: string; icon: string; minPlayers: number; maxPlayers: number; description: string }> = {
+  TICTACTOE: { label: "Tic Tac Toe", icon: "🎯", minPlayers: 2, maxPlayers: 2, description: "Classic 2-player game" },
+  CHESS: { label: "Chess", icon: "♟️", minPlayers: 2, maxPlayers: 2, description: "Strategic 2-player game" },
+  TRIVIA: { label: "Trivia", icon: "🧠", minPlayers: 2, maxPlayers: 16, description: "Test your knowledge!" },
+  BILLIARDS: { label: "Billiards", icon: "🎱", minPlayers: 2, maxPlayers: 2, description: "Pool for 2 players" },
+  POKER: { label: "Poker", icon: "🃏", minPlayers: 2, maxPlayers: 10, description: "Texas Hold'em" },
+  TRUTHS_AND_LIE: { label: "2 Truths & a Lie", icon: "🤥", minPlayers: 2, maxPlayers: 2, description: "Guess the lie!" },
+  TWENTY_ONE_QUESTIONS: { label: "21 Questions", icon: "❓", minPlayers: 2, maxPlayers: 2, description: "Get to know each other" },
+};
+
+// Helper to check if a game is available for the current player count
+const isGameAvailable = (gameType: string, playerCount: number): { available: boolean; reason?: string } => {
+  const config = GAME_CONFIGS[gameType];
+  if (!config) return { available: false, reason: "Game not found" };
+  if (playerCount < config.minPlayers) return { available: false, reason: `Needs ${config.minPlayers} players` };
+  if (playerCount > config.maxPlayers) return { available: false, reason: `Max ${config.maxPlayers} players` };
+  return { available: true };
+};
 
 interface Participant {
   odUserId: string;
@@ -85,7 +106,40 @@ export default function RoomPage() {
   const [gameEnded, setGameEnded] = useState(false);
   const [gameResult, setGameResult] = useState<any>(null);
 
+  // Video state
+  const [videoEnabled, setVideoEnabled] = useState(true);
+
+  // Invite link
+  const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
+
   const isHost = room?.hostUserId === userId;
+  
+  // Generate invite link
+  const getInviteLink = () => {
+    if (typeof window !== "undefined") {
+      return `${window.location.origin}/room/${roomId}`;
+    }
+    return "";
+  };
+
+  const copyInviteLink = async () => {
+    const link = getInviteLink();
+    try {
+      await navigator.clipboard.writeText(link);
+      setInviteLinkCopied(true);
+      setTimeout(() => setInviteLinkCopied(false), 2000);
+    } catch (err) {
+      // Fallback for browsers that don't support clipboard API
+      const textArea = document.createElement("textarea");
+      textArea.value = link;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textArea);
+      setInviteLinkCopied(true);
+      setTimeout(() => setInviteLinkCopied(false), 2000);
+    }
+  };
   const currentRound = room?.currentRound;
   const isInRound = currentRound?.participants.some(p => p.odUserId === userId);
 
@@ -120,10 +174,21 @@ export default function RoomPage() {
       transports: ["websocket"],
     });
 
+    // Track if room loaded to use in timeout
+    let roomLoaded = false;
+
     ws.on("connect", () => {
       console.log("Room WebSocket connected");
       setConnected(true);
       ws.emit("room.join", { roomId });
+      
+      // Timeout fallback - if no response in 10 seconds, show error
+      setTimeout(() => {
+        if (!roomLoaded) {
+          setError("Connection timeout - room may not exist or you may not have access");
+          setLoading(false);
+        }
+      }, 10000);
     });
 
     ws.on("connect_error", (err) => {
@@ -137,11 +202,15 @@ export default function RoomPage() {
 
     // Room events
     ws.on("room.joined", (data: { room: Room }) => {
+      console.log("Room joined successfully:", data.room?.id);
+      roomLoaded = true;
       setRoom(data.room);
       setLoading(false);
     });
 
     ws.on("room.state", (data: { room: Room }) => {
+      console.log("Room state received:", data.room?.id);
+      roomLoaded = true;
       setRoom(data.room);
       setLoading(false);
     });
@@ -240,7 +309,9 @@ export default function RoomPage() {
     });
 
     ws.on("room.error", (data: { message: string }) => {
+      console.error("Room error:", data.message);
       setError(data.message);
+      setLoading(false); // Stop loading on error so user can see the message
       setTimeout(() => setError(""), 5000);
     });
 
@@ -437,31 +508,42 @@ export default function RoomPage() {
                     Vote for a game! Time left: <span className="text-yellow-400 font-bold">{votingTimeLeft}s</span>
                   </p>
                   
-                  <div className="grid grid-cols-3 gap-3 mb-4">
-                    {GAME_TYPES.map((game) => {
-                      const voteCount = voteResults.find(v => v.gameType === game.value)?.voteCount || 0;
-                      const isMyVoteThis = myVote === game.value;
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
+                    {Object.entries(GAME_CONFIGS).map(([gameType, config]) => {
+                      const playerCount = currentRound.participants.length;
+                      const availability = isGameAvailable(gameType, playerCount);
+                      const voteCount = voteResults.find(v => v.gameType === gameType)?.voteCount || 0;
+                      const isMyVoteThis = myVote === gameType;
+                      const isDisabled = !availability.available;
                       
                       return (
                         <button
-                          key={game.value}
-                          onClick={() => !game.disabled && handleVote(game.value)}
-                          disabled={game.disabled}
-                          className={`p-4 border-2 transition-all ${
+                          key={gameType}
+                          onClick={() => !isDisabled && handleVote(gameType)}
+                          disabled={isDisabled}
+                          className={`p-4 border-2 transition-all relative ${
                             isMyVoteThis
                               ? "bg-green-900 border-green-500 text-green-400"
-                              : game.disabled
-                              ? "bg-gray-800 border-gray-600 text-gray-500 cursor-not-allowed"
+                              : isDisabled
+                              ? "bg-gray-800 border-gray-600 text-gray-500 cursor-not-allowed opacity-60"
                               : "bg-gray-800 border-white/30 text-white hover:border-white"
                           }`}
+                          title={isDisabled ? availability.reason : config.description}
                         >
-                          <span className="text-2xl">{game.icon}</span>
-                          <p className="text-sm mt-1">{game.label.split(" ")[1]}</p>
-                          <p className="text-xs mt-1 text-yellow-400">{voteCount} votes</p>
+                          <span className="text-2xl">{config.icon}</span>
+                          <p className="text-sm mt-1 font-medium">{config.label}</p>
+                          {isDisabled ? (
+                            <p className="text-xs mt-1 text-red-400">{availability.reason}</p>
+                          ) : (
+                            <p className="text-xs mt-1 text-yellow-400">{voteCount} votes</p>
+                          )}
                         </button>
                       );
                     })}
                   </div>
+                  <p className="text-xs text-gray-500">
+                    Some games are unavailable based on current player count ({currentRound.participants.length} players)
+                  </p>
                 </div>
               )}
 
@@ -560,8 +642,39 @@ export default function RoomPage() {
           )}
         </div>
 
-        {/* Sidebar - Participants */}
+        {/* Sidebar */}
         <div className="space-y-4">
+          {/* Video Panel */}
+          <div className="bg-gray-900 border border-white/20">
+            <div className="flex items-center justify-between p-3 border-b border-white/10">
+              <h3 className="text-sm font-semibold text-white">📹 Video Chat</h3>
+              <button
+                onClick={() => setVideoEnabled(!videoEnabled)}
+                className={`text-xs px-2 py-1 rounded ${
+                  videoEnabled 
+                    ? "bg-green-900 text-green-400" 
+                    : "bg-gray-700 text-gray-400"
+                }`}
+              >
+                {videoEnabled ? "On" : "Off"}
+              </button>
+            </div>
+            {videoEnabled && room && userId && (
+              <RoomVideo
+                roomId={roomId}
+                userId={userId}
+                participants={room.participants}
+                enabled={videoEnabled}
+              />
+            )}
+            {!videoEnabled && (
+              <div className="p-4 text-center text-gray-500 text-sm">
+                Video is disabled. Click "On" to enable.
+              </div>
+            )}
+          </div>
+
+          {/* Participants */}
           <div className="bg-gray-900 p-4 border border-white/20">
             <h3 className="text-lg font-semibold text-white mb-3">Participants</h3>
             <div className="space-y-2 max-h-96 overflow-y-auto">
@@ -589,6 +702,35 @@ export default function RoomPage() {
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Invite Friends */}
+          <div className="bg-gray-900 p-4 border border-white/20">
+            <h3 className="text-sm font-semibold text-gray-400 mb-3">📨 Invite Friends</h3>
+            <p className="text-xs text-gray-500 mb-3">Share this link to invite friends to join your room:</p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                readOnly
+                value={getInviteLink()}
+                className="flex-1 bg-black px-3 py-2 text-xs text-gray-300 border border-white/20 truncate"
+              />
+              <button
+                onClick={copyInviteLink}
+                className={`px-3 py-2 text-sm font-semibold transition-colors ${
+                  inviteLinkCopied 
+                    ? "bg-green-600 text-white" 
+                    : "bg-white text-black hover:bg-gray-200"
+                }`}
+              >
+                {inviteLinkCopied ? "✓ Copied!" : "Copy"}
+              </button>
+            </div>
+            {room?.participants && room.participantCount < room.maxMembers && (
+              <p className="text-xs text-gray-500 mt-2">
+                {room.maxMembers - room.participantCount} spot{room.maxMembers - room.participantCount !== 1 ? "s" : ""} remaining
+              </p>
+            )}
           </div>
 
           {/* Actions */}

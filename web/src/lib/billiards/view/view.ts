@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Scene, WebGLRenderer, Frustum, Matrix4, AmbientLight } from "three"
+import { Scene, WebGLRenderer, Frustum, Matrix4, AmbientLight, DirectionalLight } from "three"
 import { Camera } from "./camera"
 import { AimEvent } from "../events/aimevent"
 import { Table } from "../model/table"
@@ -22,10 +22,16 @@ export class View {
     this.element = element
     this.table = table
     this.assets = assets
+    console.log("[View] Creating renderer for element:", element?.tagName, element?.offsetWidth, "x", element?.offsetHeight)
     this.renderer = renderer(element)
-    this.camera = new Camera(
-      element ? element.offsetWidth / element.offsetHeight : 1
-    )
+    if (!this.renderer) {
+      console.error("[View] WebGL renderer could not be created!")
+    } else {
+      console.log("[View] Renderer created successfully")
+    }
+    const aspectRatio = element ? (element.offsetWidth || 800) / (element.offsetHeight || 400) : 2
+    console.log("[View] Camera aspect ratio:", aspectRatio)
+    this.camera = new Camera(aspectRatio)
     this.initialiseScene()
   }
 
@@ -73,15 +79,36 @@ export class View {
   }
 
   private initialiseScene() {
-    this.scene.add(new AmbientLight(0x009922, 0.3))
+    console.log("[View] Initializing scene...")
+    
+    // Add stronger ambient light for better visibility
+    const ambientLight = new AmbientLight(0xffffff, 0.6)
+    this.scene.add(ambientLight)
+    
+    // Add directional light from above
+    const dirLight = new DirectionalLight(0xffffff, 0.8)
+    dirLight.position.set(0, 0, 10)
+    this.scene.add(dirLight)
+    
     if (this.assets.background) {
+      console.log("[View] Adding background to scene")
       this.scene.add(this.assets.background)
     }
-    this.scene.add(this.assets.table)
-    this.table.mesh = this.assets.table
+    
+    if (this.assets.table) {
+      console.log("[View] Adding table to scene")
+      this.scene.add(this.assets.table)
+      this.table.mesh = this.assets.table
+    } else {
+      console.warn("[View] No table asset available!")
+    }
+    
     if (this.assets.rules.asset() !== Snooker.tablemodel) {
+      console.log("[View] Adding grid lines")
       this.scene.add(new Grid().generateLineSegments())
     }
+    
+    console.log("[View] Scene initialized with", this.scene.children.length, "objects")
   }
 
   ballToCheck = 0

@@ -65,6 +65,10 @@ export default function LobbyPage() {
     }
   };
 
+  // Created room state for showing invite link
+  const [createdRoom, setCreatedRoom] = useState<{ id: string; title: string } | null>(null);
+  const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
+
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!createForm.title.trim()) {
@@ -76,11 +80,42 @@ export default function LobbyPage() {
       setCreating(true);
       const room = await roomsApi.createRoom(createForm);
       setShowCreateModal(false);
-      router.push(`/room/${room.id}`);
+      setCreatedRoom({ id: room.id, title: room.title });
     } catch (err: any) {
       alert(err.response?.data?.message || "Failed to create room");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const getInviteLink = (roomId: string) => {
+    if (typeof window !== "undefined") {
+      return `${window.location.origin}/room/${roomId}`;
+    }
+    return "";
+  };
+
+  const copyInviteLink = async (roomId: string) => {
+    const link = getInviteLink(roomId);
+    try {
+      await navigator.clipboard.writeText(link);
+      setInviteLinkCopied(true);
+      setTimeout(() => setInviteLinkCopied(false), 2000);
+    } catch (err) {
+      const textArea = document.createElement("textarea");
+      textArea.value = link;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textArea);
+      setInviteLinkCopied(true);
+      setTimeout(() => setInviteLinkCopied(false), 2000);
+    }
+  };
+
+  const goToCreatedRoom = () => {
+    if (createdRoom) {
+      router.push(`/room/${createdRoom.id}`);
     }
   };
 
@@ -363,6 +398,56 @@ export default function LobbyPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Room Created - Share Invite Link Modal */}
+      {createdRoom && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 p-6 border border-white/20 max-w-md w-full">
+            <div className="text-center mb-6">
+              <span className="text-4xl mb-4 block">🎉</span>
+              <h2 className="text-2xl font-semibold text-white mb-2">Room Created!</h2>
+              <p className="text-gray-400">"{createdRoom.title}"</p>
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-sm text-gray-400 mb-2">Invite friends with this link:</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={getInviteLink(createdRoom.id)}
+                  className="flex-1 bg-black px-3 py-2 text-sm text-gray-300 border border-white/20 truncate"
+                />
+                <button
+                  onClick={() => copyInviteLink(createdRoom.id)}
+                  className={`px-4 py-2 font-semibold transition-colors ${
+                    inviteLinkCopied 
+                      ? "bg-green-600 text-white" 
+                      : "bg-white text-black hover:bg-gray-200"
+                  }`}
+                >
+                  {inviteLinkCopied ? "✓ Copied!" : "Copy"}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCreatedRoom(null)}
+                className="flex-1 py-3 bg-gray-800 text-white border border-white/30 hover:bg-gray-700"
+              >
+                Stay in Lobby
+              </button>
+              <button
+                onClick={goToCreatedRoom}
+                className="flex-1 py-3 bg-white text-black font-semibold hover:bg-gray-200"
+              >
+                Enter Room →
+              </button>
+            </div>
           </div>
         </div>
       )}

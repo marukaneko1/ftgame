@@ -6,6 +6,17 @@ import { v4 as uuidv4 } from "uuid";
 import * as argon2 from "argon2";
 import { ConfigService } from "@nestjs/config";
 
+// Game player limits configuration
+const GAME_PLAYER_LIMITS: Record<string, { min: number; max: number }> = {
+  TICTACTOE: { min: 2, max: 2 },
+  CHESS: { min: 2, max: 2 },
+  TRIVIA: { min: 2, max: 16 },
+  BILLIARDS: { min: 2, max: 2 },
+  POKER: { min: 2, max: 10 },
+  TRUTHS_AND_LIE: { min: 2, max: 2 },
+  TWENTY_ONE_QUESTIONS: { min: 2, max: 2 },
+};
+
 @Injectable()
 export class RoomsService {
   constructor(
@@ -384,9 +395,24 @@ export class RoomsService {
   }
 
   async voteForGame(roundId: string, odUserId: string, gameType: GameType) {
-    const round = await this.prisma.roomRound.findUnique({ where: { id: roundId } });
+    const round = await this.prisma.roomRound.findUnique({ 
+      where: { id: roundId },
+      include: { participants: true }
+    });
     if (!round) throw new NotFoundException("Round not found");
     if (round.status !== RoundStatus.VOTING) throw new BadRequestException("Voting not active");
+
+    // Validate game is compatible with player count
+    const playerCount = round.participants.length;
+    const limits = GAME_PLAYER_LIMITS[gameType];
+    if (limits) {
+      if (playerCount < limits.min) {
+        throw new BadRequestException(`${gameType} requires at least ${limits.min} players`);
+      }
+      if (playerCount > limits.max) {
+        throw new BadRequestException(`${gameType} supports maximum ${limits.max} players`);
+      }
+    }
 
     // Upsert vote
     await this.prisma.roundVote.upsert({
@@ -414,14 +440,40 @@ export class RoomsService {
   async finalizeVotingAndStartGame(roundId: string) {
     const round = await this.prisma.roomRound.findUnique({
       where: { id: roundId },
-      include: { room: true }
+      include: { room: true, participants: true }
     });
 
     if (!round) throw new NotFoundException("Round not found");
     if (round.status !== RoundStatus.VOTING) return null;
 
+    const playerCount = round.participants.length;
     const results = await this.getVotingResults(roundId);
-    const winningGame = results[0]?.gameType || GameType.TICTACTOE; // Default to TicTacToe
+    
+    // Find the highest-voted game that is compatible with the player count
+    let winningGame: GameType | null = null;
+    for (const result of results) {
+      const limits = GAME_PLAYER_LIMITS[result.gameType];
+      if (limits && playerCount >= limits.min && playerCount <= limits.max) {
+        winningGame = result.gameType;
+        break;
+      }
+    }
+    
+    // Default to a compatible game if no votes matched
+    if (!winningGame) {
+      // Find any compatible game
+      for (const [gameType, limits] of Object.entries(GAME_PLAYER_LIMITS)) {
+        if (playerCount >= limits.min && playerCount <= limits.max) {
+          winningGame = gameType as GameType;
+          break;
+        }
+      }
+    }
+    
+    // Fallback to TicTacToe if somehow nothing works (should only happen with 2 players)
+    if (!winningGame) {
+      winningGame = GameType.TICTACTOE;
+    }
 
     await this.prisma.$transaction([
       this.prisma.roomRound.update({

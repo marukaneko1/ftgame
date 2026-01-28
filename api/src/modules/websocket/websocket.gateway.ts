@@ -210,6 +210,12 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
   private async handleMatch(pair: [any, any]) {
     const [a, b] = pair;
     
+    // Safety check: ensure users are different
+    if (a.userId === b.userId) {
+      this.logger.warn(`[MATCHMAKING] Attempted to match user ${a.userId} with themselves - rejecting match`);
+      return; // Don't create a session if users are the same
+    }
+    
     // Clear any matching intervals for both users
     const intervalA = this.matchingIntervals.get(a.userId);
     if (intervalA) {
@@ -280,6 +286,11 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
           this.matchingIntervals.delete(userId);
           return;
         }
+        
+        // Add small random delay (0-500ms) to avoid all users checking at exactly the same time
+        // This reduces race conditions when multiple users join simultaneously
+        const randomDelay = Math.floor(Math.random() * 500);
+        await new Promise(resolve => setTimeout(resolve, randomDelay));
         
         // Try to find a match by checking queue again (with distance-based matching)
         const pair = await this.matchmakingService.findMatch(userId, region, language, latitude, longitude);
@@ -921,6 +932,18 @@ export class AppGateway implements OnGatewayConnection, OnGatewayDisconnect, OnM
       
       client.emit("room.joined", { room });
     } catch (error: any) {
+      // If user is already in the room, just get the room state and send it
+      if (error.message === "Already in this room") {
+        try {
+          const room = await this.roomsService.getRoomDetails(body.roomId);
+          client.join(`room:${body.roomId}`);
+          client.emit("room.joined", { room });
+          return;
+        } catch (innerError: any) {
+          client.emit("room.error", { message: innerError.message || "Failed to get room state" });
+          return;
+        }
+      }
       client.emit("room.error", { message: error.message || "Failed to join room" });
     }
   }

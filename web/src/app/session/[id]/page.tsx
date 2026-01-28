@@ -3,16 +3,27 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { io, Socket } from "socket.io-client";
-import AgoraRTC, { ICameraVideoTrack, IMicrophoneAudioTrack, IAgoraRTCClient, IAgoraRTCRemoteUser, NetworkQuality } from "agora-rtc-sdk-ng";
+import type { ICameraVideoTrack, IMicrophoneAudioTrack, IAgoraRTCClient, IAgoraRTCRemoteUser, NetworkQuality } from "agora-rtc-sdk-ng";
 import { api, videoApi, usersApi, walletApi } from "@/lib/api";
+import dynamic from "next/dynamic";
 import TicTacToeGame from "@/components/games/TicTacToeGame";
 import ChessGame from "@/components/games/ChessGame";
 import TriviaGame from "@/components/games/TriviaGame";
 import TruthsAndLieGame from "@/components/games/TruthsAndLieGame";
-import BilliardsGameV2 from "@/components/games/BilliardsGameV2";
 import PokerGame from "@/components/games/PokerGame";
 import TwentyOneQuestionsGame from "@/components/games/TwentyOneQuestionsGame";
 import BackButton from "@/components/BackButton";
+
+// Dynamic import for BilliardsGameV2 to avoid SSR issues with Three.js
+const BilliardsGameV2 = dynamic(() => import("@/components/games/BilliardsGameV2"), {
+  ssr: false,
+  loading: () => (
+    <div className="bg-gray-900 rounded-lg border border-white/20 p-6 text-center">
+      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-green-500 mx-auto mb-4"></div>
+      <p className="text-gray-400">Loading 8-Ball Pool...</p>
+    </div>
+  ),
+});
 
 // Configurable WebSocket URL
 import { getWebSocketUrl } from "@/lib/ws-config";
@@ -308,6 +319,9 @@ export default function SessionPage() {
           return; // Skip video initialization but continue with session
         }
 
+        // Dynamically import AgoraRTC to avoid SSR issues
+        const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
+        
         // Create Agora client
         const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
         clientRef.current = client;

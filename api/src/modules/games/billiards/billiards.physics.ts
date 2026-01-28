@@ -1,394 +1,283 @@
 import { BallState, Vector2D, BallHitRecord, BallPocketRecord, PhysicsResult } from './billiards.types';
 
-// Matter.js import - lazy load to ensure it's available
-function getMatter(): any {
-  try {
-    // @ts-ignore
-    const MatterLib = require('matter-js');
-    if (!MatterLib || !MatterLib.Engine) {
-      throw new Error('Matter.js Engine not found');
-    }
-    return MatterLib;
-  } catch (error) {
-    console.error('Failed to load Matter.js:', error);
-    throw new Error('Matter.js library not found. Please run: npm install matter-js');
-  }
+// Simple 2D vector math
+function distance(a: Vector2D, b: Vector2D): number {
+  return Math.sqrt(Math.pow(b.x - a.x, 2) + Math.pow(b.y - a.y, 2));
 }
 
-// Type definitions for Matter.js
-type MatterEngine = any;
-type MatterWorld = any;
-type MatterBody = any;
+function normalize(v: Vector2D): Vector2D {
+  const len = Math.sqrt(v.x * v.x + v.y * v.y);
+  if (len === 0) return { x: 0, y: 0 };
+  return { x: v.x / len, y: v.y / len };
+}
+
+function dot(a: Vector2D, b: Vector2D): number {
+  return a.x * b.x + a.y * b.y;
+}
+
+function subtract(a: Vector2D, b: Vector2D): Vector2D {
+  return { x: a.x - b.x, y: a.y - b.y };
+}
+
+function add(a: Vector2D, b: Vector2D): Vector2D {
+  return { x: a.x + b.x, y: a.y + b.y };
+}
+
+function scale(v: Vector2D, s: number): Vector2D {
+  return { x: v.x * s, y: v.y * s };
+}
+
+function length(v: Vector2D): number {
+  return Math.sqrt(v.x * v.x + v.y * v.y);
+}
+
+interface SimBall {
+  id: number;
+  pos: Vector2D;
+  vel: Vector2D;
+  pocketed: boolean;
+  pocketId: number | null;
+}
 
 export class BilliardsPhysics {
-  private engine: MatterEngine;
-  private world: MatterWorld;
-  private tableBodies: MatterBody[] = [];
-  private ballBodies: Map<number, MatterBody> = new Map();
-  private pocketBodies: MatterBody[] = [];
+  private balls: Map<number, SimBall> = new Map();
   
-  // Physics constants (standard 8-foot table)
+  // Physics constants
   private readonly CONFIG = {
-    tableWidth: 2.24,           // 2.24m (8-foot table)
-    tableHeight: 1.12,          // 1.12m
-    ballRadius: 0.028,           // 28mm standard pool ball
-    pocketRadius: 0.11,          // 11cm pocket opening (all pockets same size)
-    friction: 0.015,            // Table friction
-    frictionAir: 0.01,          // Air resistance
-    restitution: 0.8,           // Ball-to-ball bounce
-    cushionRestitution: 0.7,    // Cushion bounce
-    density: 0.001,             // Ball density
-    velocityThreshold: 0.01,    // Stop when velocity below this (m/s)
-    maxSimulationTime: 10000,    // Max 10 seconds per shot
-    playableMargin: 0.05,       // 5cm margin from cushions for playable area
+    tableWidth: 2.24,
+    tableHeight: 1.12,
+    ballRadius: 0.028,
+    pocketRadius: 0.055,    // Pocket detection radius
+    friction: 0.985,        // Velocity decay per frame
+    restitution: 0.9,       // Ball-to-ball bounce
+    cushionRestitution: 0.8,
+    minVelocity: 0.001,     // Stop threshold
+    maxFrames: 500,         // Max simulation frames
+    dt: 1/60,               // Time step
   };
 
-  constructor() {
-    // Load Matter.js
-    const M = getMatter();
-    
-    try {
-      // Create Matter.js engine
-      this.engine = M.Engine.create();
-      this.world = this.engine.world;
-      
-      // Set gravity to 0 (top-down view, no gravity)
-      this.engine.world.gravity.y = 0;
-      this.engine.world.gravity.x = 0;
-      
-      // Create table boundaries and pockets
-      this.createTable();
-      this.createPockets();
-    } catch (error: any) {
-      console.error('Failed to create Matter.js engine:', error);
-      throw new Error(`Failed to initialize physics engine: ${error.message}`);
-    }
-  }
+  // Pocket positions
+  private readonly pockets: Vector2D[] = [
+    { x: 0, y: 0 },                                              // Top-left
+    { x: this.CONFIG.tableWidth / 2, y: 0 },                     // Top-center
+    { x: this.CONFIG.tableWidth, y: 0 },                         // Top-right
+    { x: 0, y: this.CONFIG.tableHeight },                        // Bottom-left
+    { x: this.CONFIG.tableWidth / 2, y: this.CONFIG.tableHeight }, // Bottom-center
+    { x: this.CONFIG.tableWidth, y: this.CONFIG.tableHeight }    // Bottom-right
+  ];
+
+  constructor() {}
 
   /**
-   * Create table boundaries (cushions/rails)
-   * Properly positioned to contain balls within playable area
-   */
-  private createTable(): void {
-    const M = getMatter();
-    const { tableWidth, tableHeight, ballRadius, playableMargin } = this.CONFIG;
-    const cushionThickness = 0.05; // 5cm thick cushions
-    const cushionHeight = 0.1;     // 10cm high
-    
-    // Playable area boundaries (with margin from cushions)
-    const playableX = playableMargin;
-    const playableY = playableMargin;
-    const playableWidth = tableWidth - 2 * playableMargin;
-    const playableHeight = tableHeight - 2 * playableMargin;
-    
-    // Top cushion (full width, but balls can't go past playable area)
-    const topCushion = M.Bodies.rectangle(
-      tableWidth / 2,
-      cushionHeight / 2,
-      tableWidth,
-      cushionHeight,
-      {
-        isStatic: true,
-        restitution: this.CONFIG.cushionRestitution,
-        label: 'cushion-top'
-      }
-    );
-    
-    // Bottom cushion
-    const bottomCushion = M.Bodies.rectangle(
-      tableWidth / 2,
-      tableHeight - cushionHeight / 2,
-      tableWidth,
-      cushionHeight,
-      {
-        isStatic: true,
-        restitution: this.CONFIG.cushionRestitution,
-        label: 'cushion-bottom'
-      }
-    );
-    
-    // Left cushions (with gaps for corner pockets)
-    // Gap size: pocket radius * 2 + some clearance
-    const pocketGap = this.CONFIG.pocketRadius * 2.5;
-    const leftCushionTop = M.Bodies.rectangle(
-      cushionThickness / 2,
-      (cushionHeight + pocketGap) / 2,
-      cushionThickness,
-      (tableHeight - pocketGap) / 2,
-      {
-        isStatic: true,
-        restitution: this.CONFIG.cushionRestitution,
-        label: 'cushion-left-top'
-      }
-    );
-    
-    const leftCushionBottom = M.Bodies.rectangle(
-      cushionThickness / 2,
-      tableHeight - (cushionHeight + pocketGap) / 2,
-      cushionThickness,
-      (tableHeight - pocketGap) / 2,
-      {
-        isStatic: true,
-        restitution: this.CONFIG.cushionRestitution,
-        label: 'cushion-left-bottom'
-      }
-    );
-    
-    // Right cushions (with gaps for corner pockets)
-    const rightCushionTop = M.Bodies.rectangle(
-      tableWidth - cushionThickness / 2,
-      (cushionHeight + pocketGap) / 2,
-      cushionThickness,
-      (tableHeight - pocketGap) / 2,
-      {
-        isStatic: true,
-        restitution: this.CONFIG.cushionRestitution,
-        label: 'cushion-right-top'
-      }
-    );
-    
-    const rightCushionBottom = M.Bodies.rectangle(
-      tableWidth - cushionThickness / 2,
-      tableHeight - (cushionHeight + pocketGap) / 2,
-      cushionThickness,
-      (tableHeight - pocketGap) / 2,
-      {
-        isStatic: true,
-        restitution: this.CONFIG.cushionRestitution,
-        label: 'cushion-right-bottom'
-      }
-    );
-    
-    this.tableBodies = [
-      topCushion,
-      bottomCushion,
-      leftCushionTop,
-      leftCushionBottom,
-      rightCushionTop,
-      rightCushionBottom
-    ];
-    
-    M.World.add(this.world, this.tableBodies);
-  }
-
-  /**
-   * Create 6 pockets (4 corners + 2 side)
-   */
-  private createPockets(): void {
-    const M = getMatter();
-    const { tableWidth, tableHeight, pocketRadius } = this.CONFIG;
-    
-    // Pocket positions (in meters from top-left)
-    const pocketPositions = [
-      { x: 0, y: 0 },                          // Top-left
-      { x: tableWidth / 2, y: 0 },            // Top-center
-      { x: tableWidth, y: 0 },                 // Top-right
-      { x: 0, y: tableHeight },                // Bottom-left
-      { x: tableWidth / 2, y: tableHeight },   // Bottom-center
-      { x: tableWidth, y: tableHeight }        // Bottom-right
-    ];
-    
-    this.pocketBodies = pocketPositions.map((pos, index) => {
-      const pocket = M.Bodies.circle(pos.x, pos.y, pocketRadius, {
-        isStatic: true,
-        isSensor: true,           // Doesn't collide, just detects
-        label: `pocket-${index}`
-      });
-      return pocket;
-    });
-    
-    const M2 = getMatter();
-    M2.World.add(this.world, this.pocketBodies);
-  }
-
-  /**
-   * Initialize balls on table
+   * Initialize balls from state
    */
   initializeBalls(ballStates: BallState[]): void {
-    const M = getMatter();
-    // Clear existing balls
-    this.ballBodies.forEach(body => M.World.remove(this.world, body));
-    this.ballBodies.clear();
+    this.balls.clear();
     
-    // Create Matter.js bodies for each ball
-    ballStates.forEach(ballState => {
-      if (!ballState.pocketed && ballState.onTable) {
-        const ballBody = M.Bodies.circle(
-          ballState.position.x,
-          ballState.position.y,
-          this.CONFIG.ballRadius,
-          {
-            restitution: this.CONFIG.restitution,
-            friction: this.CONFIG.friction,
-            frictionAir: this.CONFIG.frictionAir,
-            density: this.CONFIG.density,
-            label: `ball-${ballState.id}`
-          }
-        );
-        
-        this.ballBodies.set(ballState.id, ballBody);
-        M.World.add(this.world, ballBody);
+    ballStates.forEach(ball => {
+      if (!ball.pocketed) {
+        this.balls.set(ball.id, {
+          id: ball.id,
+          pos: { ...ball.position },
+          vel: { x: 0, y: 0 },
+          pocketed: false,
+          pocketId: null
+        });
       }
     });
   }
 
   /**
-   * Execute a shot - apply force to cue ball and simulate
+   * Simulate a shot and return final positions
    */
   simulateShot(
     cueBallId: number,
-    power: number,      // 0-100
-    angle: number       // 0-360 degrees
+    power: number,
+    angle: number
   ): PhysicsResult {
-    const M = getMatter();
-    const cueBallBody = this.ballBodies.get(cueBallId);
-    if (!cueBallBody) {
+    const cueBall = this.balls.get(cueBallId);
+    if (!cueBall) {
       throw new Error(`Cue ball ${cueBallId} not found`);
     }
-    
-    // Convert power (0-100) to velocity (m/s)
-    // Typical pool shot: 5-15 m/s velocity
-    const maxVelocity = 15; // m/s
+
+    // Convert power (0-100) to velocity
+    const maxVelocity = 3.0; // m/s max
     const velocity = (power / 100) * maxVelocity;
     
     // Convert angle (degrees) to radians
     const angleRad = (angle * Math.PI) / 180;
     
-    // Calculate velocity vector
-    const velocityX = Math.cos(angleRad) * velocity;
-    const velocityY = Math.sin(angleRad) * velocity;
-    
-    // Apply velocity to cue ball
-    M.Body.setVelocity(cueBallBody, { x: velocityX, y: velocityY });
-    
-    // Track collisions and pocketing
+    // Set cue ball velocity
+    cueBall.vel = {
+      x: Math.cos(angleRad) * velocity,
+      y: Math.sin(angleRad) * velocity
+    };
+
+    // Track collisions
     const ballsHit: BallHitRecord[] = [];
     const ballsPocketed: BallPocketRecord[] = [];
     const hitBallIds = new Set<number>();
     let pocketOrder = 1;
-    
-    // Collision detection
-    M.Events.on(this.engine, 'collisionStart', (event: any) => {
-      event.pairs.forEach((pair: any) => {
-        const { bodyA, bodyB } = pair;
+
+    // Run simulation
+    for (let frame = 0; frame < this.CONFIG.maxFrames; frame++) {
+      // Update positions
+      for (const ball of this.balls.values()) {
+        if (ball.pocketed) continue;
         
-        // Ball-to-ball collision
-        if (bodyA.label.startsWith('ball-') && bodyB.label.startsWith('ball-')) {
-          const ballAId = parseInt(bodyA.label.split('-')[1]);
-          const ballBId = parseInt(bodyB.label.split('-')[1]);
+        // Apply velocity
+        ball.pos.x += ball.vel.x * this.CONFIG.dt;
+        ball.pos.y += ball.vel.y * this.CONFIG.dt;
+        
+        // Apply friction
+        ball.vel.x *= this.CONFIG.friction;
+        ball.vel.y *= this.CONFIG.friction;
+        
+        // Stop if very slow
+        if (length(ball.vel) < this.CONFIG.minVelocity) {
+          ball.vel = { x: 0, y: 0 };
+        }
+      }
+
+      // Check ball-ball collisions
+      const ballArray = Array.from(this.balls.values()).filter(b => !b.pocketed);
+      for (let i = 0; i < ballArray.length; i++) {
+        for (let j = i + 1; j < ballArray.length; j++) {
+          const a = ballArray[i];
+          const b = ballArray[j];
           
-          // Track which ball was hit (if cue ball hit it)
-          if (ballAId === cueBallId && !hitBallIds.has(ballBId)) {
-            hitBallIds.add(ballBId);
-            ballsHit.push({
-              ballId: ballBId,
-              timestamp: Date.now(),
-              position: { x: bodyB.position.x, y: bodyB.position.y }
-            });
-          } else if (ballBId === cueBallId && !hitBallIds.has(ballAId)) {
-            hitBallIds.add(ballAId);
-            ballsHit.push({
-              ballId: ballAId,
-              timestamp: Date.now(),
-              position: { x: bodyA.position.x, y: bodyA.position.y }
-            });
+          const dist = distance(a.pos, b.pos);
+          const minDist = this.CONFIG.ballRadius * 2;
+          
+          if (dist < minDist && dist > 0) {
+            // Collision detected
+            const normal = normalize(subtract(b.pos, a.pos));
+            
+            // Separate balls
+            const overlap = minDist - dist;
+            a.pos = add(a.pos, scale(normal, -overlap / 2));
+            b.pos = add(b.pos, scale(normal, overlap / 2));
+            
+            // Calculate collision response
+            const relVel = subtract(a.vel, b.vel);
+            const velAlongNormal = dot(relVel, normal);
+            
+            if (velAlongNormal > 0) {
+              // Apply impulse
+              const impulse = velAlongNormal * this.CONFIG.restitution;
+              a.vel = subtract(a.vel, scale(normal, impulse));
+              b.vel = add(b.vel, scale(normal, impulse));
+              
+              // Track hit
+              if (a.id === cueBallId && !hitBallIds.has(b.id)) {
+                hitBallIds.add(b.id);
+                ballsHit.push({
+                  ballId: b.id,
+                  timestamp: Date.now(),
+                  position: { ...b.pos }
+                });
+              } else if (b.id === cueBallId && !hitBallIds.has(a.id)) {
+                hitBallIds.add(a.id);
+                ballsHit.push({
+                  ballId: a.id,
+                  timestamp: Date.now(),
+                  position: { ...a.pos }
+                });
+              }
+            }
           }
         }
+      }
+
+      // Check cushion collisions
+      for (const ball of this.balls.values()) {
+        if (ball.pocketed) continue;
         
-        // Ball-to-pocket collision
-        if (bodyA.label.startsWith('ball-') && bodyB.label.startsWith('pocket-')) {
-          const ballId = parseInt(bodyA.label.split('-')[1]);
-          const pocketId = parseInt(bodyB.label.split('-')[1]);
-          
-          ballsPocketed.push({
-            ballId,
-            pocketId,
-            timestamp: Date.now(),
-            order: pocketOrder++
-          });
-        } else if (bodyB.label.startsWith('ball-') && bodyA.label.startsWith('pocket-')) {
-          const ballId = parseInt(bodyB.label.split('-')[1]);
-          const pocketId = parseInt(bodyA.label.split('-')[1]);
-          
-          ballsPocketed.push({
-            ballId,
-            pocketId,
-            timestamp: Date.now(),
-            order: pocketOrder++
-          });
+        const r = this.CONFIG.ballRadius;
+        
+        // Left cushion
+        if (ball.pos.x < r) {
+          ball.pos.x = r;
+          ball.vel.x = -ball.vel.x * this.CONFIG.cushionRestitution;
         }
-      });
-    });
-    
-    // Run simulation until all balls stop
-    const startTime = Date.now();
-    let frames = 0;
-    let allStopped = false;
-    
-    while (!allStopped && (Date.now() - startTime) < this.CONFIG.maxSimulationTime) {
-      M.Engine.update(this.engine, 1000 / 60); // 60 FPS
-      frames++;
-      
-      // Check if all balls have stopped
-      allStopped = true;
-      for (const body of this.ballBodies.values()) {
-        const velocity = Math.sqrt(
-          body.velocity.x * body.velocity.x + 
-          body.velocity.y * body.velocity.y
-        );
+        // Right cushion
+        if (ball.pos.x > this.CONFIG.tableWidth - r) {
+          ball.pos.x = this.CONFIG.tableWidth - r;
+          ball.vel.x = -ball.vel.x * this.CONFIG.cushionRestitution;
+        }
+        // Top cushion
+        if (ball.pos.y < r) {
+          ball.pos.y = r;
+          ball.vel.y = -ball.vel.y * this.CONFIG.cushionRestitution;
+        }
+        // Bottom cushion
+        if (ball.pos.y > this.CONFIG.tableHeight - r) {
+          ball.pos.y = this.CONFIG.tableHeight - r;
+          ball.vel.y = -ball.vel.y * this.CONFIG.cushionRestitution;
+        }
+      }
+
+      // Check pockets
+      for (const ball of this.balls.values()) {
+        if (ball.pocketed) continue;
         
-        if (velocity > this.CONFIG.velocityThreshold) {
+        for (let pocketIdx = 0; pocketIdx < this.pockets.length; pocketIdx++) {
+          const pocket = this.pockets[pocketIdx];
+          const dist = distance(ball.pos, pocket);
+          
+          if (dist < this.CONFIG.pocketRadius) {
+            ball.pocketed = true;
+            ball.pocketId = pocketIdx;
+            ball.vel = { x: 0, y: 0 };
+            
+            ballsPocketed.push({
+              ballId: ball.id,
+              pocketId: pocketIdx,
+              timestamp: Date.now(),
+              order: pocketOrder++
+            });
+            break;
+          }
+        }
+      }
+
+      // Check if all balls have stopped
+      let allStopped = true;
+      for (const ball of this.balls.values()) {
+        if (!ball.pocketed && length(ball.vel) > this.CONFIG.minVelocity) {
           allStopped = false;
           break;
         }
       }
+      
+      if (allStopped) break;
     }
-    
-    // Extract final ball states
+
+    // Build final ball states
     const finalBallStates: BallState[] = [];
-    for (const [ballId, body] of this.ballBodies.entries()) {
-      // Check if ball is in a pocket
-      let pocketed = false;
-      let pocketId: number | null = null;
-      
-      for (const pocketBody of this.pocketBodies) {
-        const distance = Math.sqrt(
-          Math.pow(body.position.x - pocketBody.position.x, 2) +
-          Math.pow(body.position.y - pocketBody.position.y, 2)
-        );
-        
-        if (distance < this.CONFIG.pocketRadius) {
-          pocketed = true;
-          pocketId = parseInt(pocketBody.label.split('-')[1]);
-          break;
-        }
-      }
-      
+    for (const ball of this.balls.values()) {
       finalBallStates.push({
-        id: ballId,
-        type: this.getBallType(ballId),
-        number: ballId === 0 ? 0 : ballId,
-        position: { x: body.position.x, y: body.position.y },
-        velocity: { x: body.velocity.x, y: body.velocity.y },
-        angularVelocity: body.angularVelocity || 0,
-        angle: body.angle || 0,
-        pocketed,
-        pocketedBy: null, // Will be set by game logic
-        pocketedAt: pocketed ? Date.now() : null,
-        pocketId,
-        onTable: !pocketed
+        id: ball.id,
+        type: this.getBallType(ball.id),
+        number: ball.id,
+        position: { ...ball.pos },
+        velocity: { ...ball.vel },
+        angularVelocity: 0,
+        angle: 0,
+        pocketed: ball.pocketed,
+        pocketedBy: null,
+        pocketedAt: ball.pocketed ? Date.now() : null,
+        pocketId: ball.pocketId,
+        onTable: !ball.pocketed
       });
     }
-    
-    // Remove collision listeners
-    M.Events.off(this.engine, 'collisionStart');
-    
+
     return {
       finalBallStates,
       ballsHit,
       ballsPocketed,
-      simulationTime: Date.now() - startTime,
-      frames
+      simulationTime: 0,
+      frames: 0
     };
   }
 
@@ -403,14 +292,9 @@ export class BilliardsPhysics {
   }
 
   /**
-   * Place cue ball (for ball-in-hand)
+   * Place cue ball
    */
   placeCueBall(cueBallId: number, position: Vector2D): boolean {
-    const M = getMatter();
-    const cueBallBody = this.ballBodies.get(cueBallId);
-    if (!cueBallBody) return false;
-    
-    // Validate position is on table and not overlapping other balls
     const { tableWidth, tableHeight, ballRadius } = this.CONFIG;
     
     // Check bounds
@@ -420,25 +304,33 @@ export class BilliardsPhysics {
     }
     
     // Check overlap with other balls
-    for (const [otherId, otherBody] of this.ballBodies.entries()) {
-      if (otherId === cueBallId) continue;
+    for (const ball of this.balls.values()) {
+      if (ball.id === cueBallId || ball.pocketed) continue;
       
-      const distance = Math.sqrt(
-        Math.pow(position.x - otherBody.position.x, 2) +
-        Math.pow(position.y - otherBody.position.y, 2)
-      );
-      
-      if (distance < ballRadius * 2) {
-        return false; // Overlapping
+      const dist = distance(position, ball.pos);
+      if (dist < ballRadius * 2.5) {
+        return false;
       }
     }
     
-    // Place cue ball
-    M.Body.setPosition(cueBallBody, { x: position.x, y: position.y });
-    M.Body.setVelocity(cueBallBody, { x: 0, y: 0 });
-    M.Body.setAngularVelocity(cueBallBody, 0);
+    // Get or create cue ball
+    let cueBall = this.balls.get(cueBallId);
+    if (!cueBall) {
+      cueBall = {
+        id: cueBallId,
+        pos: { ...position },
+        vel: { x: 0, y: 0 },
+        pocketed: false,
+        pocketId: null
+      };
+      this.balls.set(cueBallId, cueBall);
+    } else {
+      cueBall.pos = { ...position };
+      cueBall.vel = { x: 0, y: 0 };
+      cueBall.pocketed = false;
+      cueBall.pocketId = null;
+    }
     
     return true;
   }
 }
-

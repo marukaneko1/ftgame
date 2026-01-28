@@ -231,6 +231,8 @@ export default function PlayPage() {
 
     ws.on("match.queued", (data) => {
       console.log("Queued for matchmaking...", data);
+      // Show helpful message that you're waiting for another player
+      console.log("Waiting for another player to join the queue...");
     });
 
     ws.on("disconnect", () => {
@@ -530,7 +532,13 @@ export default function PlayPage() {
                 : "Location not available - matching by region"}
             </p>
             <p className="text-xs text-gray-500">
-              Requires at least 2 users to match. Timeout in {formatMatchingTime(120 - matchingDuration)}.
+              Waiting for another player to join... (Requires at least 2 users to match)
+            </p>
+            <p className="text-xs text-yellow-400">
+              💡 Tip: Open another browser window/tab and log in with a different account to test matching!
+            </p>
+            <p className="text-xs text-gray-500">
+              Timeout in {formatMatchingTime(120 - matchingDuration)}.
             </p>
           </div>
         ) : (

@@ -174,48 +174,101 @@ export class Rack {
 
   // 8-ball rack: triangle with 1-ball at front, 8-ball in center
   static eightBall() {
+    // Reset ball IDs for proper 8-ball game logic
+    Ball.id = 0
+    
     const triangle = Rack.trianglePositions()
-    const cueball = Rack.cueBall(Rack.spot)
-    const balls: Ball[] = [cueball]
     
-    // 8-ball in center (position 5 in triangle)
-    const eightBallPos = triangle[5] || triangle[Math.floor(triangle.length / 2)]
-    balls.push(new Ball(Rack.jitter(eightBallPos), 0x000000)) // Black 8-ball
-    
-    // 1-ball at front (position 0)
-    const oneBallPos = triangle[0]
-    balls.push(new Ball(Rack.jitter(oneBallPos), 0xff0000)) // Red 1-ball
-    
-    // Fill remaining positions with random solid/stripe arrangement
-    const remainingPositions = [...triangle]
-    remainingPositions.splice(0, 1) // Remove 1-ball position
-    remainingPositions.splice(4, 1) // Remove 8-ball position (index 5 becomes 4 after removing first)
-    
-    // Shuffle remaining positions for random arrangement
-    for (let i = remainingPositions.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [remainingPositions[i], remainingPositions[j]] = [remainingPositions[j], remainingPositions[i]];
+    // Standard 8-ball colors
+    const solidColors = {
+      1: 0xFFFF00,  // Yellow
+      2: 0x0000FF,  // Blue
+      3: 0xFF0000,  // Red
+      4: 0x800080,  // Purple
+      5: 0xFF8C00,  // Orange
+      6: 0x006400,  // Dark Green
+      7: 0x8B4513,  // Brown/Maroon
     }
     
-    // Add remaining balls (2-7 solids, 9-15 stripes)
-    let ballNumber = 2
-    remainingPositions.forEach((pos, idx) => {
-      let color: number
-      if (ballNumber <= 7) {
-        // Solids: various colors
-        const solidColors = [0xff9d00, 0x521911, 0x595200, 0xff0000, 0x050505, 0x0a74c2]
-        color = solidColors[(ballNumber - 2) % solidColors.length]
-      } else if (ballNumber === 8) {
-        ballNumber++ // Skip 8, already added
-        color = 0x087300 // Green for 9
-      } else {
-        // Stripes: various colors
-        const stripeColors = [0x087300, 0x3e009c, 0xff9d00, 0x521911, 0x595200, 0xff0000, 0x050505]
-        color = stripeColors[(ballNumber - 9) % stripeColors.length]
+    const stripeColors = {
+      9: 0xFFFF00,  // Yellow stripe
+      10: 0x0000FF, // Blue stripe
+      11: 0xFF0000, // Red stripe
+      12: 0x800080, // Purple stripe
+      13: 0xFF8C00, // Orange stripe
+      14: 0x006400, // Dark Green stripe
+      15: 0x8B4513, // Brown stripe
+    }
+    
+    // Ball 0: Cue ball (white)
+    const cueball = Rack.cueBall(Rack.spot)  // ID 0
+    
+    // Create array to hold all balls in order by ID
+    const balls: Ball[] = [cueball]
+    
+    // Standard 8-ball positions in triangle (positions in rack)
+    // Position 0: 1-ball (front)
+    // Position 4 (center of 3rd row): 8-ball
+    // Remaining positions: mix of solids and stripes
+    
+    // Create positions array with ball assignments
+    // Triangle has 15 positions (5 rows: 1+2+3+4+5)
+    const ballAssignments: {id: number, color: number, pos: Vector3}[] = []
+    
+    // 1-ball always at apex (position 0)
+    ballAssignments.push({ id: 1, color: solidColors[1], pos: triangle[0] })
+    
+    // 8-ball always in center of 3rd row (position 4 in 0-indexed triangle)
+    ballAssignments.push({ id: 8, color: 0x000000, pos: triangle[4] })
+    
+    // Remaining solids (2-7) and stripes (9-15)
+    const remainingSolids = [2, 3, 4, 5, 6, 7]
+    const remainingStripes = [9, 10, 11, 12, 13, 14, 15]
+    
+    // Shuffle them
+    for (let i = remainingSolids.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [remainingSolids[i], remainingSolids[j]] = [remainingSolids[j], remainingSolids[i]];
+    }
+    for (let i = remainingStripes.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [remainingStripes[i], remainingStripes[j]] = [remainingStripes[j], remainingStripes[i]];
+    }
+    
+    // Remaining positions (exclude 0 for 1-ball and 4 for 8-ball)
+    const remainingPositions = [1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    
+    // Mix solids and stripes for remaining positions
+    // Rule: corners of last row must have one solid and one stripe
+    let solidIdx = 0
+    let stripeIdx = 0
+    
+    remainingPositions.forEach((posIdx, i) => {
+      // Alternate between solid and stripe for fair distribution
+      if (i % 2 === 0 && solidIdx < remainingSolids.length) {
+        const ballNum = remainingSolids[solidIdx++]
+        ballAssignments.push({ id: ballNum, color: solidColors[ballNum], pos: triangle[posIdx] })
+      } else if (stripeIdx < remainingStripes.length) {
+        const ballNum = remainingStripes[stripeIdx++]
+        ballAssignments.push({ id: ballNum, color: stripeColors[ballNum], pos: triangle[posIdx] })
+      } else if (solidIdx < remainingSolids.length) {
+        const ballNum = remainingSolids[solidIdx++]
+        ballAssignments.push({ id: ballNum, color: solidColors[ballNum], pos: triangle[posIdx] })
       }
-      balls.push(new Ball(Rack.jitter(pos), color))
-      ballNumber++
     })
+    
+    // Sort by ID and create balls in order so Ball.id matches
+    ballAssignments.sort((a, b) => a.id - b.id)
+    
+    // Create balls in ID order
+    ballAssignments.forEach(assignment => {
+      const ball = new Ball(Rack.jitter(assignment.pos), assignment.color)
+      // Ball.id auto-increments, so ball.id should equal assignment.id
+      balls.push(ball)
+    })
+    
+    console.log("[Rack] Created 8-ball rack with", balls.length, "balls")
+    console.log("[Rack] Ball IDs:", balls.map(b => b.id).join(", "))
     
     return balls
   }

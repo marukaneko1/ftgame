@@ -250,6 +250,10 @@ export const videoApi = {
   getToken: async (sessionId: string): Promise<{ token: string; channelName: string; expiresAt: string }> => {
     const response = await api.get<{ token: string; channelName: string; expiresAt: string }>(`/video/token?sessionId=${sessionId}`);
     return response.data;
+  },
+  getRoomToken: async (roomId: string): Promise<{ token: string; channelName: string; expiresAt: string }> => {
+    const response = await api.get<{ token: string; channelName: string; expiresAt: string }>(`/video/room-token?roomId=${roomId}`);
+    return response.data;
   }
 };
 

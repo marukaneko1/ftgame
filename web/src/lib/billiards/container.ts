@@ -20,6 +20,7 @@ import { RuleFactory } from "./controller/rules/rulefactory"
 import { Menu } from "./view/menu"
 import { Hud } from "./view/hud"
 import { LobbyIndicator } from "./view/lobbyindicator"
+import { Ball } from "./model/ball"
 
 /**
  * Model, View, Controller container.
@@ -52,6 +53,8 @@ export class Container {
 
   constructor(element: any, log: any, assets: any, ruletype?: any, keyboard?: any, id?: any) {
     this.log = log
+    // Reset ball IDs for fresh game
+    Ball.id = 0
     this.rules = RuleFactory.create(ruletype, this)
     this.table = this.rules.table()
     this.view = new View(element, this.table, assets)

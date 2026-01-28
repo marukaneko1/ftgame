@@ -321,6 +321,24 @@ export class MatchmakingService implements OnModuleDestroy {
 
   async findMatch(userId: string, region: string, language: string, latitude?: number, longitude?: number): Promise<[QueueRequest, QueueRequest] | null> {
     const key = this.queueKey(region, language);
+    
+    // First, verify user is still in the queue
+    const redis = await this.ensureRedis();
+    const allItems = await redis.lrange(key, 0, -1);
+    const userInQueue = allItems.some(item => {
+      try {
+        const parsed = JSON.parse(item) as QueueRequest;
+        return parsed.userId === userId;
+      } catch {
+        return false;
+      }
+    });
+    
+    if (!userInQueue) {
+      this.logger.debug(`[MATCHMAKING] User ${userId} not in queue ${key}, cannot find match`);
+      return null;
+    }
+    
     return this.findClosestMatch(userId, key, latitude, longitude);
   }
 
@@ -350,14 +368,15 @@ export class MatchmakingService implements OnModuleDestroy {
       this.logger.warn(`[MATCHMAKING] Queue too short (${length} < 2) - need at least 2 users to match`);
       return null;
     }
+    
     const queueRequests: Array<{ request: QueueRequest; distance: number }> = [];
     
     for (const item of allItems) {
       try {
         const request = JSON.parse(item) as QueueRequest;
         if (request.userId === userId) {
-          // Skip self
-          continue; // Skip self
+          // Skip self - never match with yourself
+          continue;
         }
         
         // Verify user is still eligible
@@ -385,7 +404,10 @@ export class MatchmakingService implements OnModuleDestroy {
     }
     
     if (queueRequests.length === 0) {
-      this.logger.warn(`[MATCHMAKING] No eligible matches found for ${userId} in queue ${queueKey} (checked ${allItems.length} items)`);
+      this.logger.warn(`[MATCHMAKING] No eligible matches found for ${userId} in queue ${queueKey} (checked ${allItems.length} items, ${userIdsInQueue.length} unique users)`);
+      if (userIdsInQueue.length > 1) {
+        this.logger.warn(`[MATCHMAKING] Queue has ${userIdsInQueue.length} users but none are eligible matches. User IDs: ${userIdsInQueue.join(', ')}`);
+      }
       return null;
     }
     
@@ -470,13 +492,15 @@ export class MatchmakingService implements OnModuleDestroy {
       const removed2 = results[1]?.[1] as number;
       
       if (removed1 === 0 || removed2 === 0) {
-        this.logger.warn(`Removal failed in transaction (removed1: ${removed1}, removed2: ${removed2})`);
+        this.logger.warn(`[MATCHMAKING] Removal failed in transaction (removed1: ${removed1}, removed2: ${removed2}) for users ${userId} and ${closestMatch.userId}`);
           // Re-add current user if needed
           if (removed1 > 0 && removed2 === 0) {
             await redis.rpush(queueKey, currentUserJson);
         }
         return null;
       }
+      
+      this.logger.log(`[MATCHMAKING] Successfully matched ${userId} with ${closestMatch.userId} (removed both from queue)`);
       
       this.logger.log(`Successfully matched ${userId} with ${closestMatch.userId} (atomic)`);
       } catch (err) {

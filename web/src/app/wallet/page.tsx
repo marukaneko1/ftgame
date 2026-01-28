@@ -35,6 +35,7 @@ export default function WalletPage() {
 
   return (
     <main className="space-y-4">
+      <BackButton href="/dashboard" />
       <div className="flex flex-col gap-2">
         <p className="text-sm uppercase tracking-[0.25em] text-gray-400">Wallet</p>
         <h1 className="text-3xl font-semibold text-white">Tokens</h1>

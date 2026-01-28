@@ -14,6 +14,12 @@ export class VideoController {
     return this.videoService.generateTokenForSession(sessionId, user.sub);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get("room-token")
+  async getRoomToken(@CurrentUser() user: JwtPayload, @Query("roomId") roomId: string) {
+    return this.videoService.generateTokenForRoom(roomId, user.sub);
+  }
+
   @Get("app-id")
   getAppId() {
     // Public endpoint - just returns app ID for frontend initialization
