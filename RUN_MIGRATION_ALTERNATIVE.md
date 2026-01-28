@@ -62,3 +62,4 @@ We can modify the Railway build command to automatically run migrations. Let me 
 
 After running the migration, try creating a game (Chess, Poker, etc.) - it should work without the enum error!
 
+

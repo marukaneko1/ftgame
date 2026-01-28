@@ -12,3 +12,4 @@ echo "Run: git push"
 echo ""
 echo "After pushing, Railway should rescan and the security error should be resolved."
 
+

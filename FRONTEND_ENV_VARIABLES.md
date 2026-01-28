@@ -50,3 +50,4 @@ https://ftgame-api.vercel.app
 Without `NEXT_PUBLIC_API_URL`, your frontend will try to connect to `http://localhost:3001`, which won't work in production!
 
 
+
