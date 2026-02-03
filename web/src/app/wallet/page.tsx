@@ -9,11 +9,12 @@ import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/componen
 import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Progress";
 
+// 100 tokens = $1
 const TOKEN_PACKS = [
-  { id: "small", tokens: 100, price: "$0.99", popular: false },
-  { id: "medium", tokens: 500, price: "$3.99", popular: true },
-  { id: "large", tokens: 1200, price: "$7.99", popular: false },
-  { id: "mega", tokens: 3000, price: "$14.99", popular: false },
+  { id: "small", tokens: 100, price: "$1", popular: false },
+  { id: "medium", tokens: 500, price: "$5", popular: true },
+  { id: "large", tokens: 1000, price: "$10", popular: false },
+  { id: "mega", tokens: 2000, price: "$20", popular: false },
 ];
 
 export default function WalletPage() {

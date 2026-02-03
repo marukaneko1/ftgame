@@ -1,6 +1,7 @@
 "use client";
 
 import { ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import TopNav from "./TopNav";
 import StatusBar from "./StatusBar";
 import { ToastProvider } from "@/components/ui/Toast";
@@ -30,6 +31,10 @@ export default function AppShell({
   activeRooms,
   streak,
 }: AppShellProps) {
+  const pathname = usePathname();
+  const isHomepage = pathname === "/";
+  const showHeader = showNav && !isHomepage;
+
   return (
     <ToastProvider>
       <div className="min-h-screen flex flex-col relative">
@@ -61,8 +66,8 @@ export default function AppShell({
           />
         </div>
 
-        {/* Top Navigation */}
-        {showNav && (
+        {/* Top Navigation - hidden on homepage (/) so landing is full-screen */}
+        {showHeader && (
           <header className="sticky top-0 z-50 bg-base/80 backdrop-blur-glass border-b border-border-subtle">
             <TopNav
               isLoggedIn={isLoggedIn}

@@ -1,6 +1,10 @@
 "use client";
 
 import { useState, useMemo, useCallback } from "react";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
+import { Modal, ModalHeader, ModalTitle, ModalBody, ModalFooter } from "@/components/ui/Modal";
 
 // Types matching the backend
 type PieceType = 'K' | 'Q' | 'R' | 'B' | 'N' | 'P';
@@ -353,39 +357,48 @@ export default function ChessGame({ gameState, odUserId, onMove, onForfeit }: Ch
   };
 
   return (
-    <div className="flex flex-col items-center gap-4 p-4 bg-gray-900 rounded-lg border border-white/20">
+    <Card variant="elevated" padding="md" className="flex flex-col items-center gap-4">
       {/* Header */}
       <div className="flex items-center justify-between w-full max-w-md">
-        <div className="text-white">
-          <span className="font-bold">Chess</span>
-          <span className="ml-2 text-sm text-gray-400">
+        <div className="text-txt-primary">
+          <span className="font-display font-bold text-lg flex items-center gap-2">
+            <span>♟️</span> Chess
+          </span>
+          <span className="ml-2 text-sm text-txt-secondary">
             Playing as {myColor}
           </span>
         </div>
-        <div className={`px-3 py-1 rounded text-sm font-medium ${
-          gameState.gameOver 
-            ? 'bg-gray-600 text-white' 
-            : isMyTurn 
-              ? 'bg-green-600 text-white' 
-              : 'bg-yellow-600 text-black'
-        }`}>
+        <Badge 
+          variant={
+            gameState.gameOver 
+              ? 'default' 
+              : isMyTurn 
+                ? 'success' 
+                : 'warning'
+          }
+          size="md"
+          dot={!gameState.gameOver}
+          pulse={isMyTurn && !gameState.gameOver}
+        >
           {getStatusText()}
-        </div>
+        </Badge>
       </div>
 
       {/* Opponent info */}
-      <div className="flex items-center justify-between w-full max-w-md bg-gray-800 px-3 py-2 rounded">
-        <div className="flex items-center gap-2">
-          <div className={`w-3 h-3 rounded-full ${myColor === 'white' ? 'bg-gray-900' : 'bg-white'}`} />
-          <span className="text-white text-sm">Opponent</span>
+      <Card variant="glass" padding="sm" className="w-full max-w-md">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className={`w-3 h-3 rounded-full ${myColor === 'white' ? 'bg-base border border-border-strong' : 'bg-txt-primary'}`} />
+            <span className="text-txt-secondary text-sm">Opponent</span>
+          </div>
+          <div className="flex gap-1">
+            {renderCapturedPieces(capturedPieces[myColor])}
+          </div>
         </div>
-        <div className="flex gap-1">
-          {renderCapturedPieces(capturedPieces[myColor])}
-        </div>
-      </div>
+      </Card>
 
       {/* Chess Board */}
-      <div className="border-4 border-amber-900 rounded shadow-2xl">
+      <div className="border-4 border-accent/30 rounded-lg shadow-glow-purple overflow-hidden">
         <div className="grid grid-cols-8">
           {Array(8).fill(null).map((_, row) =>
             Array(8).fill(null).map((_, col) => renderSquare(row, col))
@@ -394,82 +407,91 @@ export default function ChessGame({ gameState, odUserId, onMove, onForfeit }: Ch
       </div>
 
       {/* Player info */}
-      <div className="flex items-center justify-between w-full max-w-md bg-gray-800 px-3 py-2 rounded">
-        <div className="flex items-center gap-2">
-          <div className={`w-3 h-3 rounded-full ${myColor === 'white' ? 'bg-white' : 'bg-gray-900'}`} />
-          <span className="text-white text-sm">You</span>
+      <Card variant="neon" padding="sm" className="w-full max-w-md">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className={`w-3 h-3 rounded-full ${myColor === 'white' ? 'bg-txt-primary' : 'bg-base border border-border-strong'}`} />
+            <span className="text-txt-primary text-sm font-medium">You</span>
+          </div>
+          <div className="flex gap-1">
+            {renderCapturedPieces(capturedPieces[myColor === 'white' ? 'black' : 'white'])}
+          </div>
         </div>
-        <div className="flex gap-1">
-          {renderCapturedPieces(capturedPieces[myColor === 'white' ? 'black' : 'white'])}
-        </div>
-      </div>
+      </Card>
 
       {/* Move history */}
-      <div className="w-full max-w-md bg-gray-800 p-2 rounded max-h-20 overflow-y-auto">
-        <p className="text-xs text-gray-400 font-mono">
+      <Card variant="default" padding="sm" className="w-full max-w-md max-h-20 overflow-y-auto">
+        <p className="text-xs text-txt-muted font-mono">
           {formatMoveHistory() || 'Game started'}
         </p>
-      </div>
+      </Card>
 
       {/* Controls */}
       {!gameState.gameOver && (
         <div className="flex gap-2">
-          <button
+          <Button
+            variant="danger"
+            size="sm"
             onClick={() => setShowForfeitConfirm(true)}
-            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
           >
             Resign
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Promotion Dialog */}
-      {showPromotionDialog && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-6 rounded-lg border border-white/30">
-            <h3 className="text-white text-lg font-bold mb-4">Choose promotion piece</h3>
-            <div className="flex gap-4">
-              {(['Q', 'R', 'B', 'N'] as PieceType[]).map(type => (
-                <button
-                  key={type}
-                  onClick={() => handlePromotion(type)}
-                  className="w-16 h-16 bg-amber-100 rounded flex items-center justify-center text-4xl hover:bg-amber-200 transition-colors"
-                >
-                  {PIECE_UNICODE[myColor][type]}
-                </button>
-              ))}
-            </div>
+      <Modal
+        open={showPromotionDialog}
+        onClose={() => setShowPromotionDialog(false)}
+      >
+        <ModalHeader>
+          <ModalTitle>Choose promotion piece</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <div className="flex gap-4 justify-center">
+            {(['Q', 'R', 'B', 'N'] as PieceType[]).map(type => (
+              <button
+                key={type}
+                onClick={() => handlePromotion(type)}
+                className="w-16 h-16 bg-amber-100 rounded-lg flex items-center justify-center text-4xl hover:bg-amber-200 hover:shadow-glow-purple transition-all border-2 border-transparent hover:border-accent"
+              >
+                {PIECE_UNICODE[myColor][type]}
+              </button>
+            ))}
           </div>
-        </div>
-      )}
+        </ModalBody>
+      </Modal>
 
       {/* Forfeit Confirmation */}
-      {showForfeitConfirm && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-6 rounded-lg border border-white/30">
-            <h3 className="text-white text-lg font-bold mb-4">Resign game?</h3>
-            <p className="text-gray-400 mb-4">This will count as a loss.</p>
-            <div className="flex gap-4">
-              <button
-                onClick={() => {
-                  onForfeit();
-                  setShowForfeitConfirm(false);
-                }}
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-              >
-                Resign
-              </button>
-              <button
-                onClick={() => setShowForfeitConfirm(false)}
-                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <Modal
+        open={showForfeitConfirm}
+        onClose={() => setShowForfeitConfirm(false)}
+      >
+        <ModalHeader>
+          <ModalTitle>Resign game?</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <p className="text-txt-secondary">This will count as a loss.</p>
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant="ghost"
+            onClick={() => setShowForfeitConfirm(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => {
+              onForfeit();
+              setShowForfeitConfirm(false);
+            }}
+          >
+            Resign
+          </Button>
+        </ModalFooter>
+      </Modal>
+    </Card>
   );
 }
 

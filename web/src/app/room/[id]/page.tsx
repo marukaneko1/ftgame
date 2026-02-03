@@ -2,17 +2,23 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
+import Link from "next/link";
 import { io, Socket } from "socket.io-client";
 import dynamic from "next/dynamic";
 import { roomsApi, walletApi } from "@/lib/api";
-import BackButton from "@/components/BackButton";
 import TicTacToeGame from "@/components/games/TicTacToeGame";
 import ChessGame from "@/components/games/ChessGame";
+import { Button, IconButton } from "@/components/ui/Button";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
+import { Badge, StatusBadge } from "@/components/ui/Badge";
+import { Input } from "@/components/ui/Input";
+import { Modal, ModalHeader, ModalTitle, ModalBody, ModalFooter } from "@/components/ui/Modal";
+import { Spinner } from "@/components/ui/Progress";
 
 // Dynamic import for RoomVideo to avoid SSR issues with Agora SDK
 const RoomVideo = dynamic(() => import("@/components/RoomVideo"), { 
   ssr: false,
-  loading: () => <div className="p-4 text-center text-gray-500 text-sm">Loading video...</div>
+  loading: () => <div className="p-4 text-center text-txt-muted text-sm flex items-center justify-center gap-2"><Spinner size="sm" /> Loading video...</div>
 });
 
 import { getWebSocketUrl } from "@/lib/ws-config";
@@ -374,129 +380,144 @@ export default function RoomPage() {
 
   if (loading) {
     return (
-      <main className="space-y-4">
-        <div className="bg-gray-900 p-6 border border-white/20 text-center">
-          <p className="text-gray-400">Loading room...</p>
-        </div>
-      </main>
+      <div className="space-y-6 animate-fade-in">
+        <Card variant="elevated" padding="lg" className="text-center">
+          <div className="flex items-center justify-center gap-3">
+            <Spinner size="md" />
+            <p className="text-txt-secondary">Loading room...</p>
+          </div>
+        </Card>
+      </div>
     );
   }
 
   if (!room) {
     return (
-      <main className="space-y-4">
-        <div className="bg-gray-900 p-6 border border-white/20 text-center">
-          <p className="text-red-400">Room not found or access denied</p>
-          <button
-            onClick={() => router.push("/lobby")}
-            className="mt-4 bg-white px-4 py-2 text-black font-semibold"
-          >
+      <div className="space-y-6 animate-fade-in">
+        <Card variant="elevated" padding="lg" className="text-center">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-error-muted flex items-center justify-center">
+            <span className="text-2xl">🚫</span>
+          </div>
+          <p className="text-error font-medium text-lg mb-2">Room not found or access denied</p>
+          <p className="text-txt-muted text-sm mb-6">{error || "The room may have been closed or you don't have permission to join."}</p>
+          <Button variant="primary" onClick={() => router.push("/lobby")}>
             Back to Lobby
-          </button>
-        </div>
-      </main>
+          </Button>
+        </Card>
+      </div>
     );
   }
 
   return (
-    <main className="space-y-4">
+    <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="bg-gray-900 p-6 border border-white/20">
-        <div className="flex justify-between items-start mb-4">
+      <Card variant="elevated" padding="lg">
+        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-4">
           <div>
-            <p className="text-sm uppercase tracking-[0.25em] text-gray-400">Game Night</p>
-            <h1 className="text-2xl font-semibold text-white">{room.title}</h1>
+            <Badge variant="accent" size="sm" className="mb-2">Game Night</Badge>
+            <h1 className="text-2xl font-display text-txt-primary tracking-tight">{room.title}</h1>
             {room.description && (
-              <p className="text-sm text-gray-400 mt-1">{room.description}</p>
+              <p className="text-txt-secondary mt-1">{room.description}</p>
             )}
           </div>
           <div className="flex items-center gap-3">
             {/* Wallet */}
-            <div className="bg-gradient-to-r from-yellow-900 to-yellow-700 px-4 py-2 border-2 border-yellow-500">
-              <p className="text-xs text-yellow-300">Balance</p>
-              <p className="font-bold text-white">{walletBalance.toLocaleString()}</p>
+            <div className="px-4 py-2 bg-gold/10 border border-gold/30 rounded-lg">
+              <p className="text-xs text-gold/80 uppercase tracking-wide">Balance</p>
+              <p className="font-mono font-bold text-gold">{walletBalance.toLocaleString()}</p>
             </div>
-            <BackButton href="/lobby" />
+            <Link href="/lobby">
+              <Button variant="ghost" size="sm">← Lobby</Button>
+            </Link>
           </div>
         </div>
 
         {/* Status bar */}
-        <div className="flex flex-wrap gap-4 items-center text-sm">
-          <span className={`px-2 py-1 ${connected ? "bg-green-900 text-green-400" : "bg-red-900 text-red-400"}`}>
-            {connected ? "● Connected" : "○ Disconnected"}
-          </span>
-          <span className="text-gray-400">
-            Status: <span className={
-              room.status === "LIVE" ? "text-green-400" :
-              room.status === "VOTING" ? "text-blue-400" :
-              room.status === "IN_GAME" ? "text-purple-400" : "text-gray-400"
-            }>{room.status}</span>
-          </span>
-          <span className="text-gray-400">
-            Players: <span className="text-white">{room.participantCount}/{room.maxMembers}</span>
+        <div className="flex flex-wrap gap-3 items-center">
+          <Badge variant={connected ? "success" : "danger"} dot={connected} pulse={connected} size="sm">
+            {connected ? "Connected" : "Disconnected"}
+          </Badge>
+          <Badge 
+            variant={
+              room.status === "LIVE" ? "success" :
+              room.status === "VOTING" ? "info" :
+              room.status === "IN_GAME" ? "accent" : "default"
+            } 
+            size="sm"
+          >
+            {room.status}
+          </Badge>
+          <span className="text-txt-muted text-sm">
+            Players: <span className="text-txt-primary font-medium">{room.participantCount}/{room.maxMembers}</span>
           </span>
           {currentRound && (
-            <span className="text-gray-400">
-              Pool: <span className="text-yellow-400">{currentRound.poolTokens} tokens</span>
+            <span className="text-txt-muted text-sm">
+              Pool: <span className="text-gold font-medium">{currentRound.poolTokens} tokens</span>
             </span>
           )}
         </div>
-      </div>
+      </Card>
 
       {/* Error */}
       {error && (
-        <div className="bg-red-900/50 border border-red-500 p-3 text-red-300 text-sm">
-          {error}
-        </div>
+        <Card variant="default" padding="md" className="border-error/30 bg-error-muted">
+          <p className="text-error text-sm">{error}</p>
+        </Card>
       )}
 
-      <div className="grid lg:grid-cols-3 gap-4">
+      <div className="grid lg:grid-cols-3 gap-6">
         {/* Main Game Area */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="lg:col-span-2 space-y-6">
           {/* Round Status / Game */}
           {currentRound ? (
-            <div className="bg-gray-900 p-6 border border-white/20">
-              <h3 className="text-lg font-semibold text-white mb-4">
-                Round {currentRound.roundNumber} 
-                <span className={`ml-2 text-sm px-2 py-1 ${
-                  currentRound.status === "WAITING" ? "bg-yellow-900 text-yellow-400" :
-                  currentRound.status === "VOTING" ? "bg-blue-900 text-blue-400" :
-                  currentRound.status === "IN_GAME" ? "bg-purple-900 text-purple-400" :
-                  "bg-gray-800 text-gray-400"
-                }`}>
+            <Card variant="default" padding="lg">
+              <div className="flex items-center gap-3 mb-6">
+                <h3 className="text-xl font-display text-txt-primary">
+                  Round {currentRound.roundNumber}
+                </h3>
+                <Badge 
+                  variant={
+                    currentRound.status === "WAITING" ? "warning" :
+                    currentRound.status === "VOTING" ? "info" :
+                    currentRound.status === "IN_GAME" ? "accent" : "default"
+                  }
+                  size="sm"
+                >
                   {currentRound.status}
-                </span>
-              </h3>
+                </Badge>
+              </div>
 
               {/* Waiting for players */}
               {currentRound.status === "WAITING" && (
                 <div>
-                  <p className="text-gray-400 mb-4">
-                    Entry fee: <span className="text-yellow-400">{currentRound.entryFeeTokens} tokens</span>
-                    {" · "}Participants: <span className="text-white">{currentRound.participants.length}</span>
+                  <p className="text-txt-secondary mb-4">
+                    Entry fee: <span className="text-gold font-medium">{currentRound.entryFeeTokens} tokens</span>
+                    {" · "}Participants: <span className="text-txt-primary font-medium">{currentRound.participants.length}</span>
                   </p>
                   
-                  {!isInRound && (
-                    <button
-                      onClick={handleJoinRound}
-                      disabled={walletBalance < currentRound.entryFeeTokens}
-                      className="bg-white px-6 py-2 text-black font-semibold hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Join Round ({currentRound.entryFeeTokens} tokens)
-                    </button>
-                  )}
+                  <div className="flex flex-wrap gap-3">
+                    {!isInRound && (
+                      <Button
+                        variant="primary"
+                        onClick={handleJoinRound}
+                        disabled={walletBalance < currentRound.entryFeeTokens}
+                      >
+                        Join Round ({currentRound.entryFeeTokens} tokens)
+                      </Button>
+                    )}
 
-                  {isHost && currentRound.participants.length >= 2 && (
-                    <button
-                      onClick={handleStartVoting}
-                      className="ml-2 bg-green-600 px-6 py-2 text-white font-semibold hover:bg-green-500"
-                    >
-                      Start Voting (20s)
-                    </button>
-                  )}
+                    {isHost && currentRound.participants.length >= 2 && (
+                      <Button variant="success" onClick={handleStartVoting}>
+                        Start Voting (20s)
+                      </Button>
+                    )}
+                  </div>
 
                   {isInRound && (
-                    <p className="text-green-400 mt-2">✓ You're in this round!</p>
+                    <p className="text-success mt-4 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-success"></span>
+                      You're in this round!
+                    </p>
                   )}
                 </div>
               )}
@@ -504,9 +525,12 @@ export default function RoomPage() {
               {/* Voting */}
               {currentRound.status === "VOTING" && (
                 <div>
-                  <p className="text-gray-400 mb-4">
-                    Vote for a game! Time left: <span className="text-yellow-400 font-bold">{votingTimeLeft}s</span>
-                  </p>
+                  <div className="flex items-center gap-3 mb-4">
+                    <p className="text-txt-secondary">Vote for a game!</p>
+                    <Badge variant="warning" size="md" className="font-mono">
+                      {votingTimeLeft}s
+                    </Badge>
+                  </div>
                   
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
                     {Object.entries(GAME_CONFIGS).map(([gameType, config]) => {
@@ -521,27 +545,30 @@ export default function RoomPage() {
                           key={gameType}
                           onClick={() => !isDisabled && handleVote(gameType)}
                           disabled={isDisabled}
-                          className={`p-4 border-2 transition-all relative ${
+                          className={`p-4 rounded-lg border-2 transition-all relative ${
                             isMyVoteThis
-                              ? "bg-green-900 border-green-500 text-green-400"
+                              ? "bg-success-muted border-success text-success"
                               : isDisabled
-                              ? "bg-gray-800 border-gray-600 text-gray-500 cursor-not-allowed opacity-60"
-                              : "bg-gray-800 border-white/30 text-white hover:border-white"
+                              ? "bg-surface-secondary border-border-subtle text-txt-muted cursor-not-allowed opacity-60"
+                              : "bg-surface-secondary border-border-default text-txt-primary hover:border-accent hover:bg-surface-tertiary"
                           }`}
                           title={isDisabled ? availability.reason : config.description}
                         >
                           <span className="text-2xl">{config.icon}</span>
                           <p className="text-sm mt-1 font-medium">{config.label}</p>
                           {isDisabled ? (
-                            <p className="text-xs mt-1 text-red-400">{availability.reason}</p>
+                            <p className="text-xs mt-1 text-error">{availability.reason}</p>
                           ) : (
-                            <p className="text-xs mt-1 text-yellow-400">{voteCount} votes</p>
+                            <p className="text-xs mt-1 text-gold">{voteCount} votes</p>
+                          )}
+                          {isMyVoteThis && (
+                            <span className="absolute top-2 right-2 text-success">✓</span>
                           )}
                         </button>
                       );
                     })}
                   </div>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-txt-muted">
                     Some games are unavailable based on current player count ({currentRound.participants.length} players)
                   </p>
                 </div>
@@ -560,7 +587,10 @@ export default function RoomPage() {
                       participants={currentRound.participants}
                     />
                   ) : (
-                    <p className="text-gray-400">Loading game...</p>
+                    <div className="flex items-center justify-center gap-2 py-8">
+                      <Spinner size="sm" />
+                      <p className="text-txt-muted">Loading game...</p>
+                    </div>
                   )}
                 </div>
               )}
@@ -593,7 +623,10 @@ export default function RoomPage() {
                       }}
                     />
                   ) : (
-                    <p className="text-gray-400">Loading game...</p>
+                    <div className="flex items-center justify-center gap-2 py-8">
+                      <Spinner size="sm" />
+                      <p className="text-txt-muted">Loading game...</p>
+                    </div>
                   )}
                 </div>
               )}
@@ -601,63 +634,68 @@ export default function RoomPage() {
               {/* Game Ended */}
               {currentRound.status === "COMPLETED" && gameResult && (
                 <div className="text-center py-8">
-                  <p className="text-4xl mb-4">
-                    {gameResult.isDraw ? "🤝" : gameResult.winnerId === userId ? "🎉" : "😢"}
-                  </p>
-                  <p className={`text-2xl font-bold ${
-                    gameResult.isDraw ? "text-yellow-400" :
-                    gameResult.winnerId === userId ? "text-green-400" : "text-red-400"
+                  <div className={`w-20 h-20 mx-auto mb-4 rounded-full flex items-center justify-center ${
+                    gameResult.isDraw ? "bg-warning-muted" :
+                    gameResult.winnerId === userId ? "bg-success-muted" : "bg-error-muted"
+                  }`}>
+                    <span className="text-4xl">
+                      {gameResult.isDraw ? "🤝" : gameResult.winnerId === userId ? "🎉" : "😢"}
+                    </span>
+                  </div>
+                  <p className={`text-2xl font-display ${
+                    gameResult.isDraw ? "text-warning" :
+                    gameResult.winnerId === userId ? "text-success" : "text-error"
                   }`}>
                     {gameResult.isDraw ? "It's a Draw!" :
                      gameResult.winnerId === userId ? `You Won ${gameResult.payout} tokens!` : "You Lost!"}
                   </p>
                   
                   {isHost && (
-                    <button
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      className="mt-6"
                       onClick={() => setShowStartRoundModal(true)}
-                      className="mt-6 bg-white px-6 py-3 text-black font-semibold hover:bg-gray-200"
                     >
                       Start Next Round
-                    </button>
+                    </Button>
                   )}
                 </div>
               )}
-            </div>
+            </Card>
           ) : (
             /* No active round */
-            <div className="bg-gray-900 p-6 border border-white/20 text-center">
-              <p className="text-gray-400 mb-4">No active round</p>
-              {isHost && (
-                <button
-                  onClick={() => setShowStartRoundModal(true)}
-                  className="bg-white px-6 py-3 text-black font-semibold hover:bg-gray-200"
-                >
+            <Card variant="glass" padding="lg" className="text-center">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-surface-secondary flex items-center justify-center">
+                <span className="text-2xl">🎮</span>
+              </div>
+              <p className="text-txt-secondary mb-4">No active round</p>
+              {isHost ? (
+                <Button variant="primary" onClick={() => setShowStartRoundModal(true)}>
                   Start a Round
-                </button>
+                </Button>
+              ) : (
+                <p className="text-sm text-txt-muted">Waiting for host to start a round...</p>
               )}
-              {!isHost && (
-                <p className="text-sm text-gray-500">Waiting for host to start a round...</p>
-              )}
-            </div>
+            </Card>
           )}
         </div>
 
         {/* Sidebar */}
         <div className="space-y-4">
           {/* Video Panel */}
-          <div className="bg-gray-900 border border-white/20">
-            <div className="flex items-center justify-between p-3 border-b border-white/10">
-              <h3 className="text-sm font-semibold text-white">📹 Video Chat</h3>
-              <button
+          <Card variant="default" padding="none" className="overflow-hidden">
+            <div className="flex items-center justify-between p-3 border-b border-border-subtle">
+              <h3 className="text-sm font-display text-txt-primary flex items-center gap-2">
+                <span>📹</span> Video Chat
+              </h3>
+              <Button
+                variant={videoEnabled ? "success" : "ghost"}
+                size="sm"
                 onClick={() => setVideoEnabled(!videoEnabled)}
-                className={`text-xs px-2 py-1 rounded ${
-                  videoEnabled 
-                    ? "bg-green-900 text-green-400" 
-                    : "bg-gray-700 text-gray-400"
-                }`}
               >
                 {videoEnabled ? "On" : "Off"}
-              </button>
+              </Button>
             </div>
             {videoEnabled && room && userId && (
               <RoomVideo
@@ -668,133 +706,125 @@ export default function RoomPage() {
               />
             )}
             {!videoEnabled && (
-              <div className="p-4 text-center text-gray-500 text-sm">
-                Video is disabled. Click "On" to enable.
+              <div className="p-6 text-center">
+                <p className="text-txt-muted text-sm">Video is disabled. Click "On" to enable.</p>
               </div>
             )}
-          </div>
+          </Card>
 
           {/* Participants */}
-          <div className="bg-gray-900 p-4 border border-white/20">
-            <h3 className="text-lg font-semibold text-white mb-3">Participants</h3>
-            <div className="space-y-2 max-h-96 overflow-y-auto">
-              {room.participants.map((p) => (
-                <div
-                  key={p.odUserId}
-                  className={`p-3 bg-gray-800 border ${
-                    p.odUserId === userId ? "border-green-500" : "border-white/10"
-                  }`}
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="text-white font-semibold">
-                        {p.displayName}
-                        {p.role === "HOST" && <span className="ml-2 text-yellow-400 text-xs">👑 HOST</span>}
-                        {p.odUserId === userId && <span className="ml-2 text-green-400 text-xs">(You)</span>}
-                      </p>
-                      <p className="text-xs text-gray-500">@{p.username}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-yellow-400 font-semibold">{p.walletBalance}</p>
-                      <p className="text-xs text-gray-500">tokens</p>
+          <Card variant="default" padding="md">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <span>👥</span> Participants
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {room.participants.map((p) => (
+                  <div
+                    key={p.odUserId}
+                    className={`p-3 rounded-lg bg-surface-secondary border ${
+                      p.odUserId === userId ? "border-accent" : "border-border-subtle"
+                    }`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="text-txt-primary font-medium">
+                          {p.displayName}
+                          {p.role === "HOST" && <Badge variant="warning" size="sm" className="ml-2">👑 HOST</Badge>}
+                          {p.odUserId === userId && <Badge variant="accent" size="sm" className="ml-2">You</Badge>}
+                        </p>
+                        <p className="text-xs text-txt-muted">@{p.username}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-gold font-mono font-medium">{p.walletBalance}</p>
+                        <p className="text-xs text-txt-muted">tokens</p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Invite Friends */}
-          <div className="bg-gray-900 p-4 border border-white/20">
-            <h3 className="text-sm font-semibold text-gray-400 mb-3">📨 Invite Friends</h3>
-            <p className="text-xs text-gray-500 mb-3">Share this link to invite friends to join your room:</p>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                readOnly
-                value={getInviteLink()}
-                className="flex-1 bg-black px-3 py-2 text-xs text-gray-300 border border-white/20 truncate"
-              />
-              <button
-                onClick={copyInviteLink}
-                className={`px-3 py-2 text-sm font-semibold transition-colors ${
-                  inviteLinkCopied 
-                    ? "bg-green-600 text-white" 
-                    : "bg-white text-black hover:bg-gray-200"
-                }`}
-              >
-                {inviteLinkCopied ? "✓ Copied!" : "Copy"}
-              </button>
-            </div>
-            {room?.participants && room.participantCount < room.maxMembers && (
-              <p className="text-xs text-gray-500 mt-2">
-                {room.maxMembers - room.participantCount} spot{room.maxMembers - room.participantCount !== 1 ? "s" : ""} remaining
-              </p>
-            )}
-          </div>
+          <Card variant="glass" padding="md">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <span>📨</span> Invite Friends
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-txt-muted mb-3">Share this link to invite friends:</p>
+              <div className="flex gap-2">
+                <Input
+                  value={getInviteLink()}
+                  readOnly
+                  className="text-xs"
+                />
+                <Button
+                  variant={inviteLinkCopied ? "success" : "secondary"}
+                  size="sm"
+                  onClick={copyInviteLink}
+                >
+                  {inviteLinkCopied ? "✓ Copied!" : "Copy"}
+                </Button>
+              </div>
+              {room?.participants && room.participantCount < room.maxMembers && (
+                <p className="text-xs text-txt-muted mt-2">
+                  {room.maxMembers - room.participantCount} spot{room.maxMembers - room.participantCount !== 1 ? "s" : ""} remaining
+                </p>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Actions */}
-          <div className="bg-gray-900 p-4 border border-white/20">
-            <h3 className="text-sm font-semibold text-gray-400 mb-3">Actions</h3>
-            <div className="space-y-2">
-              <button
-                onClick={handleLeaveRoom}
-                className="w-full py-2 bg-gray-800 text-white border border-white/30 hover:bg-gray-700"
-              >
+          <Card variant="default" padding="md">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <span>⚙️</span> Actions
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Button variant="ghost" fullWidth onClick={handleLeaveRoom}>
                 Leave Room
-              </button>
+              </Button>
               {isHost && (
-                <button
-                  onClick={handleEndRoom}
-                  className="w-full py-2 bg-red-900 text-red-400 border border-red-500 hover:bg-red-800"
-                >
+                <Button variant="danger" fullWidth onClick={handleEndRoom}>
                   End Room
-                </button>
+                </Button>
               )}
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
 
       {/* Start Round Modal */}
-      {showStartRoundModal && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-900 p-6 border border-white/20 max-w-sm w-full">
-            <h2 className="text-xl font-semibold text-white mb-4">Start New Round</h2>
-            
-            <div className="mb-4">
-              <label className="block text-sm text-gray-400 mb-1">Entry Fee (tokens)</label>
-              <input
-                type="number"
-                min="0"
-                value={roundEntryFee}
-                onChange={(e) => setRoundEntryFee(parseInt(e.target.value) || 0)}
-                className="w-full bg-black px-3 py-2 text-white border border-white/30"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Set to 0 for free round. Winner takes all!
-              </p>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowStartRoundModal(false)}
-                className="flex-1 py-2 bg-gray-800 text-white border border-white/30 hover:bg-gray-700"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleStartRound}
-                disabled={startingRound}
-                className="flex-1 py-2 bg-white text-black font-semibold hover:bg-gray-200 disabled:opacity-50"
-              >
-                {startingRound ? "Starting..." : "Start Round"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </main>
+      <Modal open={showStartRoundModal} onClose={() => setShowStartRoundModal(false)} size="sm">
+        <ModalHeader>
+          <ModalTitle>Start New Round</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <Input
+            label="Entry Fee (tokens)"
+            type="number"
+            min={0}
+            value={String(roundEntryFee)}
+            onChange={(e) => setRoundEntryFee(parseInt(e.target.value) || 0)}
+            hint="Set to 0 for free round. Winner takes all!"
+          />
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="ghost" onClick={() => setShowStartRoundModal(false)}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={handleStartRound} loading={startingRound}>
+            Start Round
+          </Button>
+        </ModalFooter>
+      </Modal>
+    </div>
   );
 }
 
@@ -829,11 +859,11 @@ function RoomTicTacToe({
     <div>
       {/* Status */}
       <div className="mb-4 text-center">
-        <p className="text-sm text-gray-400 mb-1">
-          You are: <span className={mySymbol === "X" ? "text-blue-400 font-bold" : "text-red-400 font-bold"}>{mySymbol}</span>
+        <p className="text-sm text-txt-muted mb-1">
+          You are: <span className={mySymbol === "X" ? "text-info font-bold" : "text-error font-bold"}>{mySymbol}</span>
         </p>
         {!gameEnded && (
-          <p className={`text-lg font-semibold ${isMyTurn ? "text-green-400" : "text-yellow-400"}`}>
+          <p className={`text-lg font-display ${isMyTurn ? "text-success" : "text-warning"}`}>
             {isMyTurn ? "Your Turn!" : `${getPlayerName(isMyTurn ? "" : (gameState.currentTurn === "X" ? gameState.playerX : gameState.playerO))}'s Turn`}
           </p>
         )}
@@ -841,8 +871,8 @@ function RoomTicTacToe({
 
       {/* Board */}
       <div className="flex justify-center mb-4">
-        <div className={`grid grid-cols-3 gap-2 p-3 rounded ${
-          gameEnded ? "bg-gray-700" : isMyTurn ? "bg-green-900/30 ring-2 ring-green-500" : "bg-gray-700"
+        <div className={`grid grid-cols-3 gap-2 p-4 rounded-xl ${
+          gameEnded ? "bg-surface-secondary" : isMyTurn ? "bg-success-muted ring-2 ring-success" : "bg-surface-secondary"
         }`}>
           {gameState.board.map((cell: string | null, index: number) => (
             <button
@@ -851,10 +881,10 @@ function RoomTicTacToe({
               disabled={gameEnded || !isMyTurn || !!cell}
               className={`
                 w-16 h-16 text-3xl font-bold flex items-center justify-center
-                transition-all duration-200 border border-gray-500
-                ${!cell && !gameEnded && isMyTurn ? "bg-gray-600 hover:bg-gray-500" : "bg-gray-700"}
-                ${isWinningCell(index) ? "bg-green-600 ring-2 ring-green-400 animate-pulse" : ""}
-                ${cell === "X" ? "text-blue-400" : "text-red-400"}
+                transition-all duration-fast rounded-lg border border-border-default
+                ${!cell && !gameEnded && isMyTurn ? "bg-surface-tertiary hover:bg-accent-muted hover:border-accent cursor-pointer" : "bg-surface-primary"}
+                ${isWinningCell(index) ? "bg-success-muted ring-2 ring-success animate-pulse" : ""}
+                ${cell === "X" ? "text-info" : "text-error"}
               `}
             >
               {cell}

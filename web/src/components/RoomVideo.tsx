@@ -9,6 +9,9 @@ import AgoraRTC, {
   VideoEncoderConfiguration
 } from "agora-rtc-sdk-ng";
 import { videoApi } from "@/lib/api";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
 
 interface RoomVideoProps {
   roomId: string;
@@ -245,42 +248,55 @@ export default function RoomVideo({ roomId, userId, participants, enabled = true
 
   if (!enabled || !appId) {
     return (
-      <div className="bg-gray-800 p-4 border border-white/20 text-center">
-        <p className="text-gray-500 text-sm">Video not available</p>
-      </div>
+      <Card variant="glass" padding="md" className="text-center">
+        <div className="flex flex-col items-center gap-2 py-4">
+          <svg className="w-8 h-8 text-txt-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+          <p className="text-txt-muted text-sm">Video not available</p>
+        </div>
+      </Card>
     );
   }
 
   return (
-    <div className="bg-gray-900 border border-white/20 overflow-hidden">
+    <Card variant="elevated" padding="none" className="overflow-hidden">
       {/* Error Display */}
       {error && (
-        <div className="bg-red-900/50 p-2 text-red-300 text-sm text-center">
-          {error}
+        <div className="bg-error-muted p-3 border-b border-error/30">
+          <Badge variant="error" size="md">{error}</Badge>
         </div>
       )}
 
       {/* Video Grid */}
-      <div className={`grid ${getGridClass()} gap-1 p-1`}>
+      <div className={`grid ${getGridClass()} gap-1 p-1 bg-base`}>
         {/* Local Video */}
-        <div className="relative aspect-video bg-gray-800">
+        <div className="relative aspect-video bg-surface-primary rounded-md overflow-hidden">
           <div 
             ref={localVideoRef} 
             className={`w-full h-full ${isCameraOff ? 'hidden' : ''}`}
           />
           {isCameraOff && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-700">
-              <span className="text-4xl">📷</span>
+            <div className="absolute inset-0 flex items-center justify-center bg-surface-secondary">
+              <div className="flex flex-col items-center gap-2">
+                <div className="w-12 h-12 rounded-full bg-surface-tertiary flex items-center justify-center">
+                  <svg className="w-6 h-6 text-txt-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                  </svg>
+                </div>
+                <span className="text-xs text-txt-muted">Camera Off</span>
+              </div>
             </div>
           )}
-          <div className="absolute bottom-1 left-1 bg-black/70 px-2 py-0.5 text-xs text-white rounded">
-            You {isMuted && "🔇"} {isCameraOff && "📷"}
+          <div className="absolute bottom-2 left-2 bg-base/80 backdrop-blur-sm px-2 py-1 text-xs text-txt-primary rounded-md flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-success"></span>
+            You {isMuted && <span className="text-error">🔇</span>}
           </div>
         </div>
 
         {/* Remote Videos */}
         {remoteUsers.map(remoteUser => (
-          <div key={remoteUser.uid} className="relative aspect-video bg-gray-800">
+          <div key={remoteUser.uid} className="relative aspect-video bg-surface-primary rounded-md overflow-hidden">
             <div 
               ref={(el) => {
                 if (el) remoteVideoRefs.current.set(remoteUser.uid, el);
@@ -288,47 +304,52 @@ export default function RoomVideo({ roomId, userId, participants, enabled = true
               className={`w-full h-full ${!remoteUser.hasVideo ? 'hidden' : ''}`}
             />
             {!remoteUser.hasVideo && (
-              <div className="absolute inset-0 flex items-center justify-center bg-gray-700">
-                <span className="text-4xl">👤</span>
+              <div className="absolute inset-0 flex items-center justify-center bg-surface-secondary">
+                <div className="flex flex-col items-center gap-2">
+                  <div className="w-12 h-12 rounded-full bg-surface-tertiary flex items-center justify-center">
+                    <svg className="w-6 h-6 text-txt-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                    </svg>
+                  </div>
+                  <span className="text-xs text-txt-muted">No Video</span>
+                </div>
               </div>
             )}
-            <div className="absolute bottom-1 left-1 bg-black/70 px-2 py-0.5 text-xs text-white rounded">
-              {getDisplayName(remoteUser.uid)} {!remoteUser.hasAudio && "🔇"}
+            <div className="absolute bottom-2 left-2 bg-base/80 backdrop-blur-sm px-2 py-1 text-xs text-txt-primary rounded-md flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${remoteUser.hasAudio ? 'bg-success' : 'bg-error'}`}></span>
+              {getDisplayName(remoteUser.uid)}
             </div>
           </div>
         ))}
       </div>
 
       {/* Controls */}
-      <div className="flex justify-center gap-2 p-2 bg-gray-800/50">
-        <button
+      <div className="flex justify-center gap-3 p-3 bg-surface-primary/50 backdrop-blur-sm border-t border-border-subtle">
+        <Button
+          variant={isMuted ? "danger" : "secondary"}
+          size="sm"
           onClick={toggleMute}
-          className={`px-3 py-1.5 text-sm rounded transition-colors ${
-            isMuted 
-              ? "bg-red-600 text-white hover:bg-red-500" 
-              : "bg-gray-700 text-white hover:bg-gray-600"
-          }`}
+          icon={<span>{isMuted ? "🔇" : "🎤"}</span>}
         >
-          {isMuted ? "🔇 Unmute" : "🎤 Mute"}
-        </button>
-        <button
+          {isMuted ? "Unmute" : "Mute"}
+        </Button>
+        <Button
+          variant={isCameraOff ? "danger" : "secondary"}
+          size="sm"
           onClick={toggleCamera}
-          className={`px-3 py-1.5 text-sm rounded transition-colors ${
-            isCameraOff 
-              ? "bg-red-600 text-white hover:bg-red-500" 
-              : "bg-gray-700 text-white hover:bg-gray-600"
-          }`}
+          icon={<span>{isCameraOff ? "📷" : "📹"}</span>}
         >
-          {isCameraOff ? "📷 Show" : "📹 Hide"}
-        </button>
+          {isCameraOff ? "Show" : "Hide"}
+        </Button>
       </div>
 
       {/* Connection status */}
       {!isInitialized && !error && (
-        <div className="text-center py-2 text-gray-400 text-sm">
+        <div className="flex items-center justify-center gap-2 py-3 text-txt-muted text-sm bg-surface-primary/30">
+          <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
           Connecting to video...
         </div>
       )}
-    </div>
+    </Card>
   );
 }

@@ -2,6 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Socket } from "socket.io-client";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
 
 // Types matching backend
 interface TicTacToeState {
@@ -160,62 +163,76 @@ export default function TicTacToeGame({
     if (!endResult) return { text: "", color: "", emoji: "" };
 
     if (endResult.isDraw) {
-      return { text: "It's a Draw!", color: "text-yellow-400", emoji: "🤝" };
+      return { text: "It's a Draw!", color: "text-warning", emoji: "🤝" };
     }
 
     const iWon = endResult.winnerId === userId;
     if (endResult.reason === "forfeit") {
       return iWon
-        ? { text: "You Win! (Opponent Forfeited)", color: "text-green-400", emoji: "🏆" }
-        : { text: "You Forfeited", color: "text-red-400", emoji: "🏳️" };
+        ? { text: "You Win! (Opponent Forfeited)", color: "text-success", emoji: "🏆" }
+        : { text: "You Forfeited", color: "text-error", emoji: "🏳️" };
     }
 
     return iWon
-      ? { text: "You Win!", color: "text-green-400", emoji: "🎉" }
-      : { text: "You Lose!", color: "text-red-400", emoji: "😢" };
+      ? { text: "You Win!", color: "text-success", emoji: "🎉" }
+      : { text: "You Lose!", color: "text-error", emoji: "😢" };
   };
 
   if (!gameState) {
     return (
-      <div className="bg-gray-800 p-6 border border-white/20 text-center">
-        <p className="text-gray-400">Loading game...</p>
-      </div>
+      <Card variant="glass" padding="lg" className="text-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+          <p className="text-txt-muted">Loading game...</p>
+        </div>
+      </Card>
     );
   }
 
   const resultMessage = getResultMessage();
 
   return (
-    <div className="bg-gray-800 p-4 border border-white/20">
+    <Card variant="elevated" padding="md">
       {/* Game Header */}
       <div className="flex justify-between items-center mb-4">
         <div>
-          <h3 className="text-xl font-bold text-white">Tic Tac Toe</h3>
-          <p className="text-sm text-gray-400">
-            You are: <span className={mySymbol === "X" ? "text-blue-400 font-bold" : "text-red-400 font-bold"}>{mySymbol}</span>
+          <h3 className="text-xl font-display font-bold text-txt-primary flex items-center gap-2">
+            <span>⭕</span> Tic Tac Toe
+          </h3>
+          <p className="text-sm text-txt-secondary mt-1">
+            You are: <span className={mySymbol === "X" ? "text-info font-bold" : "text-error font-bold"}>{mySymbol}</span>
           </p>
         </div>
         <div className="text-right">
           {!gameEnded && (
-            <p className={`text-sm font-semibold ${isMyTurn ? "text-green-400" : "text-yellow-400"}`}>
+            <Badge 
+              variant={isMyTurn ? "success" : "warning"} 
+              size="md"
+              dot
+              pulse={isMyTurn}
+            >
               {isMyTurn ? "Your Turn!" : `${opponent?.displayName || "Opponent"}'s Turn`}
-            </p>
+            </Badge>
           )}
         </div>
       </div>
 
       {/* Error Message */}
       {error && (
-        <div className="mb-4 p-2 bg-red-900/50 border border-red-500 text-red-300 text-sm text-center">
-          {error}
+        <div className="mb-4 p-3 bg-error-muted rounded-lg border border-error/30">
+          <Badge variant="error">{error}</Badge>
         </div>
       )}
 
       {/* Game Board */}
       <div className="flex justify-center mb-4">
         <div 
-          className={`grid grid-cols-3 gap-2 p-3 rounded-lg ${
-            gameEnded ? "bg-gray-700" : isMyTurn ? "bg-green-900/30 ring-2 ring-green-500" : "bg-gray-700"
+          className={`grid grid-cols-3 gap-2 p-4 rounded-xl transition-all ${
+            gameEnded 
+              ? "bg-surface-tertiary" 
+              : isMyTurn 
+                ? "bg-success-muted ring-2 ring-success/50 shadow-[0_0_20px_var(--color-success-muted)]" 
+                : "bg-surface-tertiary"
           }`}
         >
           {gameState.board.map((cell, index) => (
@@ -226,21 +243,20 @@ export default function TicTacToeGame({
               className={`
                 w-20 h-20 text-4xl font-bold
                 flex items-center justify-center
-                transition-all duration-200
+                transition-all duration-fast rounded-lg
                 ${cell === null && !gameEnded && isMyTurn
-                  ? "bg-gray-600 hover:bg-gray-500 cursor-pointer"
-                  : "bg-gray-700 cursor-not-allowed"
+                  ? "bg-surface-secondary hover:bg-surface-primary hover:shadow-glow-purple cursor-pointer border border-border-strong hover:border-accent/50"
+                  : "bg-surface-primary cursor-not-allowed border border-border-default"
                 }
                 ${isWinningCell(index)
-                  ? "bg-green-600 ring-2 ring-green-400 animate-pulse"
+                  ? "bg-success/30 ring-2 ring-success shadow-[0_0_15px_var(--color-success-muted)] animate-pulse"
                   : ""
                 }
                 ${lastMove === index && !isWinningCell(index)
-                  ? "ring-2 ring-yellow-400"
+                  ? "ring-2 ring-gold/50"
                   : ""
                 }
-                ${cell === "X" ? "text-blue-400" : "text-red-400"}
-                border border-gray-500
+                ${cell === "X" ? "text-info" : "text-error"}
               `}
             >
               {cell && (
@@ -255,50 +271,55 @@ export default function TicTacToeGame({
 
       {/* Game Result */}
       {gameEnded && endResult && (
-        <div className="text-center mb-4 p-4 bg-gray-900 border border-white/20 rounded">
-          <p className="text-4xl mb-2">{resultMessage.emoji}</p>
-          <p className={`text-2xl font-bold ${resultMessage.color}`}>
+        <Card variant="neon" padding="md" className="text-center mb-4 animate-scale-in">
+          <p className="text-5xl mb-3">{resultMessage.emoji}</p>
+          <p className={`text-2xl font-display font-bold ${resultMessage.color}`}>
             {resultMessage.text}
           </p>
           {endResult.winnerName && !endResult.isDraw && (
-            <p className="text-sm text-gray-400 mt-1">
-              Winner: {endResult.winnerName}
+            <p className="text-sm text-txt-muted mt-2">
+              Winner: <span className="text-txt-secondary font-medium">{endResult.winnerName}</span>
             </p>
           )}
-        </div>
+        </Card>
       )}
 
       {/* Players Info */}
-      <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-        <div className={`p-2 rounded ${me?.side === gameState.currentTurn && !gameEnded ? "bg-green-900/50 border border-green-500" : "bg-gray-700"}`}>
-          <p className="text-gray-400">You ({me?.side})</p>
-          <p className="text-white font-semibold">{me?.displayName || "Player"}</p>
-        </div>
-        <div className={`p-2 rounded ${opponent?.side === gameState.currentTurn && !gameEnded ? "bg-yellow-900/50 border border-yellow-500" : "bg-gray-700"}`}>
-          <p className="text-gray-400">Opponent ({opponent?.side})</p>
-          <p className="text-white font-semibold">{opponent?.displayName || "Opponent"}</p>
-        </div>
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <Card 
+          variant={me?.side === gameState.currentTurn && !gameEnded ? "neon" : "default"} 
+          padding="sm"
+          className={me?.side === gameState.currentTurn && !gameEnded ? "shadow-[0_0_15px_var(--color-success-muted)] border-success/50" : ""}
+        >
+          <p className="text-xs text-txt-muted uppercase tracking-wide">You ({me?.side})</p>
+          <p className="text-txt-primary font-semibold">{me?.displayName || "Player"}</p>
+        </Card>
+        <Card 
+          variant={opponent?.side === gameState.currentTurn && !gameEnded ? "neon" : "default"} 
+          padding="sm"
+          className={opponent?.side === gameState.currentTurn && !gameEnded ? "shadow-[0_0_15px_var(--color-warning-muted)] border-warning/50" : ""}
+        >
+          <p className="text-xs text-txt-muted uppercase tracking-wide">Opponent ({opponent?.side})</p>
+          <p className="text-txt-primary font-semibold">{opponent?.displayName || "Opponent"}</p>
+        </Card>
       </div>
 
       {/* Actions */}
       {!gameEnded && (
         <div className="flex justify-center">
-          <button
-            onClick={handleForfeit}
-            className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold border border-red-500 transition-colors"
-          >
+          <Button variant="danger" size="sm" onClick={handleForfeit}>
             Forfeit Game
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Move History */}
       {gameState.moveHistory.length > 0 && (
-        <div className="mt-4 text-xs text-gray-500">
-          <p>Moves: {gameState.moveHistory.length}</p>
+        <div className="mt-4 pt-3 border-t border-border-subtle">
+          <p className="text-xs text-txt-muted font-mono">Moves: {gameState.moveHistory.length}</p>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 

@@ -16,7 +16,14 @@ export default () => ({
     secretKey: process.env.STRIPE_SECRET_KEY,
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
     basicPriceId: process.env.STRIPE_BASIC_PRICE_ID,
-    tokenPackPriceId: process.env.STRIPE_TOKEN_PACK_PRICE_ID
+    tokenPackPriceId: process.env.STRIPE_TOKEN_PACK_PRICE_ID,
+    // Optional: per-pack price IDs (100 tokens = $1). Fallback to tokenPackPriceId if not set.
+    tokenPackPriceIds: {
+      small: process.env.STRIPE_TOKEN_PACK_SMALL_PRICE_ID || process.env.STRIPE_TOKEN_PACK_PRICE_ID,
+      medium: process.env.STRIPE_TOKEN_PACK_MEDIUM_PRICE_ID || process.env.STRIPE_TOKEN_PACK_PRICE_ID,
+      large: process.env.STRIPE_TOKEN_PACK_LARGE_PRICE_ID || process.env.STRIPE_TOKEN_PACK_PRICE_ID,
+      mega: process.env.STRIPE_TOKEN_PACK_MEGA_PRICE_ID || process.env.STRIPE_TOKEN_PACK_PRICE_ID
+    }
   },
   agora: {
     appId: process.env.AGORA_APP_ID,

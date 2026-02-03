@@ -7,10 +7,12 @@ import { ConfigService } from "@nestjs/config";
 @Injectable()
 export class WalletService {
   private stripe: Stripe | null = null;
+  // 100 tokens = $1
   private packTokens: Record<string, number> = {
-    small: 500,
-    medium: 1200,
-    large: 3000
+    small: 100,
+    medium: 500,
+    large: 1000,
+    mega: 2000
   };
 
   constructor(private readonly prisma: PrismaService, private readonly configService: ConfigService) {
@@ -197,10 +199,11 @@ export class WalletService {
     if (!this.stripe) {
       throw new BadRequestException("Stripe is not configured");
     }
-    const priceId = this.configService.get<string>("stripe.tokenPackPriceId");
-    if (!priceId) throw new BadRequestException("Stripe token pack price not configured");
     const tokens = this.packTokens[packId];
     if (!tokens) throw new BadRequestException("Invalid packId");
+    const priceIds = this.configService.get<Record<string, string>>("stripe.tokenPackPriceIds");
+    const priceId = (priceIds && priceIds[packId]) || this.configService.get<string>("stripe.tokenPackPriceId");
+    if (!priceId) throw new BadRequestException("Stripe token pack price not configured");
     const successUrl = `${this.configService.get("urls.webBaseUrl")}/wallet?checkout=success`;
     const cancelUrl = `${this.configService.get("urls.webBaseUrl")}/wallet?checkout=cancel`;
 

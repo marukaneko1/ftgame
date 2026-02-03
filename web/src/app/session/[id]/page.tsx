@@ -13,14 +13,19 @@ import TruthsAndLieGame from "@/components/games/TruthsAndLieGame";
 import PokerGame from "@/components/games/PokerGame";
 import TwentyOneQuestionsGame from "@/components/games/TwentyOneQuestionsGame";
 import BackButton from "@/components/BackButton";
+import { Button, IconButton } from "@/components/ui/Button";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
+import { Badge, StatusBadge } from "@/components/ui/Badge";
+import { Modal, ModalHeader, ModalTitle, ModalBody, ModalFooter } from "@/components/ui/Modal";
+import { Input, Textarea } from "@/components/ui/Input";
 
 // Dynamic import for BilliardsGameV2 to avoid SSR issues with Three.js
 const BilliardsGameV2 = dynamic(() => import("@/components/games/BilliardsGameV2"), {
   ssr: false,
   loading: () => (
-    <div className="bg-gray-900 rounded-lg border border-white/20 p-6 text-center">
-      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-green-500 mx-auto mb-4"></div>
-      <p className="text-gray-400">Loading 8-Ball Pool...</p>
+    <div className="bg-surface-primary rounded-lg border border-border-default p-6 text-center">
+      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-accent mx-auto mb-4"></div>
+      <p className="text-txt-secondary">Loading 8-Ball Pool...</p>
     </div>
   ),
 });
@@ -64,6 +69,31 @@ export default function SessionPage() {
   const [remoteVideoActive, setRemoteVideoActive] = useState(false);
   const [videosSwapped, setVideosSwapped] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  // Floating PiP state for when playing games
+  const [pipPosition, setPipPosition] = useState({ x: 20, y: 20 });
+  const [pipSize, setPipSize] = useState({ width: 280, height: 210 }); // Resizable size
+  const [isDraggingPip, setIsDraggingPip] = useState(false);
+  const [isResizingPip, setIsResizingPip] = useState(false);
+  const [pipMinimized, setPipMinimized] = useState(false);
+  const pipDragOffset = useRef({ x: 0, y: 0 });
+  const pipResizeStart = useRef({ width: 0, height: 0, mouseX: 0, mouseY: 0 });
+  const floatingPipRef = useRef<HTMLDivElement>(null);
+  const pipVideoRef = useRef<HTMLDivElement>(null);
+  const [pipVideoAttached, setPipVideoAttached] = useState(false);
+  const [pipModeActive, setPipModeActive] = useState(false); // When true, remote video plays in PiP
+  const pipModeActiveRef = useRef(false); // Ref for closure access
+  
+  // Gift modal state
+  const [giftModalOpen, setGiftModalOpen] = useState(false);
+  const [giftAmount, setGiftAmount] = useState("");
+  const [giftError, setGiftError] = useState("");
+  const [giftSending, setGiftSending] = useState(false);
+  
+  // Report modal state
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+  const [reportSending, setReportSending] = useState(false);
   
   // New state for audio/video controls
   const [isMuted, setIsMuted] = useState(false);
@@ -171,13 +201,13 @@ export default function SessionPage() {
   // Network quality label
   const getNetworkQualityLabel = (quality: number): { label: string; color: string } => {
     switch (quality) {
-      case 1: return { label: "Excellent", color: "text-green-400" };
-      case 2: return { label: "Good", color: "text-green-300" };
-      case 3: return { label: "Poor", color: "text-yellow-400" };
-      case 4: return { label: "Bad", color: "text-orange-400" };
-      case 5: return { label: "Very Bad", color: "text-red-400" };
-      case 6: return { label: "Down", color: "text-red-600" };
-      default: return { label: "Unknown", color: "text-gray-400" };
+      case 1: return { label: "Excellent", color: "text-success" };
+      case 2: return { label: "Good", color: "text-success" };
+      case 3: return { label: "Poor", color: "text-warning" };
+      case 4: return { label: "Bad", color: "text-warning" };
+      case 5: return { label: "Very Bad", color: "text-error" };
+      case 6: return { label: "Down", color: "text-error" };
+      default: return { label: "Unknown", color: "text-txt-muted" };
     }
   };
 
@@ -780,66 +810,71 @@ export default function SessionPage() {
             }
           }
           
-          // Check remote video - try to attach if track exists and container is available
-          if (remoteUserRef.current?.videoTrack && mainVideoRef.current) {
-            // Check if video is actually playing by checking the element
-            const videoElement = mainVideoRef.current.querySelector('video') as HTMLVideoElement;
-            const isVideoActuallyPlaying = videoElement && 
-                                         !videoElement.paused && 
-                                         videoElement.readyState >= 2 && // HAVE_CURRENT_DATA or higher
-                                         videoElement.videoWidth > 0 && 
-                                         videoElement.videoHeight > 0;
-            
-            if (!isVideoActuallyPlaying) {
-              try {
-                // Stop first to ensure clean state
+          // Check remote video - try to attach if track exists
+          // Skip periodic video attachment if PiP mode is active (PiP effect handles it)
+          if (remoteUserRef.current?.videoTrack && !pipModeActiveRef.current) {
+            if (mainVideoRef.current) {
+              // Check if video is actually playing by checking the element
+              const videoElement = mainVideoRef.current.querySelector('video') as HTMLVideoElement;
+              const isVideoActuallyPlaying = videoElement && 
+                                           !videoElement.paused && 
+                                           videoElement.readyState >= 2 && // HAVE_CURRENT_DATA or higher
+                                           videoElement.videoWidth > 0 && 
+                                           videoElement.videoHeight > 0;
+              
+              if (!isVideoActuallyPlaying) {
                 try {
-                  remoteUserRef.current.videoTrack.stop();
-                } catch (e) {
-                  // Ignore
-                }
-                
-                // @ts-ignore
-                remoteUserRef.current.videoTrack.play(mainVideoRef.current);
-                console.log("🔄 Re-attached remote video (periodic check)");
-                
-                // Verify it worked - check multiple times
-                let verifyAttempts = 0;
-                const verifyInterval = setInterval(() => {
-                  verifyAttempts++;
-                  const newVideoElement = mainVideoRef.current?.querySelector('video') as HTMLVideoElement;
-                  const isNowPlaying = newVideoElement && 
-                                      !newVideoElement.paused && 
-                                      newVideoElement.readyState >= 2 &&
-                                      newVideoElement.videoWidth > 0 && 
-                                      newVideoElement.videoHeight > 0;
-                  
-                  if (isNowPlaying) {
-                    setRemoteVideoActive(true);
-                    console.log("✅ Remote video verified playing (periodic check)");
-                    clearInterval(verifyInterval);
-                  } else if (verifyAttempts >= 5) {
-                    // Try to force play if it's not working
-                    if (newVideoElement) {
-                      newVideoElement.play().catch(() => {
-                        console.warn("Could not play video element");
-                      });
-                    }
-                    clearInterval(verifyInterval);
+                  // Stop first to ensure clean state
+                  try {
+                    remoteUserRef.current.videoTrack.stop();
+                  } catch (e) {
+                    // Ignore
                   }
-                }, 200);
-              } catch (e: any) {
-                console.error("❌ Error re-attaching remote video:", e?.message);
-              }
-            } else {
-              // Video is playing, ensure state is correct (use ref to avoid stale closure)
-              if (!remoteVideoActiveRef.current) {
-                setRemoteVideoActive(true);
+                  
+                  // @ts-ignore
+                  remoteUserRef.current.videoTrack.play(mainVideoRef.current);
+                  console.log("🔄 Re-attached remote video (periodic check)");
+                  
+                  // Verify it worked - check multiple times
+                  let verifyAttempts = 0;
+                  const verifyInterval = setInterval(() => {
+                    verifyAttempts++;
+                    const newVideoElement = mainVideoRef.current?.querySelector('video') as HTMLVideoElement;
+                    const isNowPlaying = newVideoElement && 
+                                        !newVideoElement.paused && 
+                                        newVideoElement.readyState >= 2 &&
+                                        newVideoElement.videoWidth > 0 && 
+                                        newVideoElement.videoHeight > 0;
+                    
+                    if (isNowPlaying) {
+                      setRemoteVideoActive(true);
+                      console.log("✅ Remote video verified playing (periodic check)");
+                      clearInterval(verifyInterval);
+                    } else if (verifyAttempts >= 5) {
+                      // Try to force play if it's not working
+                      if (newVideoElement) {
+                        newVideoElement.play().catch(() => {
+                          console.warn("Could not play video element");
+                        });
+                      }
+                      clearInterval(verifyInterval);
+                    }
+                  }, 200);
+                } catch (e: any) {
+                  console.error("❌ Error re-attaching remote video:", e?.message);
+                }
+              } else {
+                // Video is playing, ensure state is correct (use ref to avoid stale closure)
+                if (!remoteVideoActiveRef.current) {
+                  setRemoteVideoActive(true);
+                }
               }
             }
-          } else {
-            // Log why we're not trying to attach (only once every few checks)
-            // Silence periodic logs to reduce noise
+          } else if (remoteUserRef.current?.videoTrack && pipModeActiveRef.current) {
+            // In PiP mode - just ensure remoteVideoActive state is set
+            if (!remoteVideoActiveRef.current) {
+              setRemoteVideoActive(true);
+            }
           }
         }, 2000); // Check every 2 seconds
         
@@ -1381,42 +1416,323 @@ export default function SessionPage() {
   };
 
   const handleSendGift = () => {
+    setGiftError("");
+    setGiftAmount("");
+    setGiftModalOpen(true);
+  };
+
+  const handleConfirmGift = () => {
     if (walletBalance <= 0) {
-      alert("You don't have any tokens to send. Please purchase tokens first.");
+      setGiftError("You don't have any tokens to send.");
       return;
     }
     
-    const amount = prompt(`Enter token amount to send as gift (you have ${walletBalance} tokens):`);
-    if (amount && socket) {
-      const amountNum = parseInt(amount);
-      if (isNaN(amountNum) || amountNum <= 0) {
-        alert("Please enter a valid positive number");
-        return;
-      }
-      if (amountNum > walletBalance) {
-        alert(`Insufficient tokens. You have ${walletBalance} tokens.`);
-        return;
-      }
+    const amountNum = parseInt(giftAmount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      setGiftError("Please enter a valid positive number");
+      return;
+    }
+    if (amountNum > walletBalance) {
+      setGiftError(`Insufficient tokens. You have ${walletBalance} tokens.`);
+      return;
+    }
+    
+    if (socket) {
+      setGiftSending(true);
       socket.emit("session.sendGift", { sessionId, amountTokens: amountNum });
+      // Close modal after a short delay
+      setTimeout(() => {
+        setGiftModalOpen(false);
+        setGiftSending(false);
+        setGiftAmount("");
+        setGiftError("");
+      }, 500);
     }
   };
 
+  const handleReport = () => {
+    setReportReason("");
+    setReportModalOpen(true);
+  };
+
+  const handleConfirmReport = () => {
+    if (!reportReason.trim()) {
+      return;
+    }
+    
+    if (socket) {
+      setReportSending(true);
+      socket.emit("session.report", { sessionId, reason: reportReason });
+      setTimeout(() => {
+        setReportModalOpen(false);
+        setReportSending(false);
+        setReportReason("");
+      }, 500);
+    }
+  };
+
+  // PiP dragging handlers
+  const handlePipMouseDown = useCallback((e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    if ((e.target as HTMLElement).closest('.resize-handle')) return;
+    setIsDraggingPip(true);
+    const rect = floatingPipRef.current?.getBoundingClientRect();
+    if (rect) {
+      pipDragOffset.current = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+    }
+    e.preventDefault();
+  }, []);
+
+  const handlePipMouseMove = useCallback((e: MouseEvent) => {
+    if (isDraggingPip) {
+      const newX = e.clientX - pipDragOffset.current.x;
+      const newY = e.clientY - pipDragOffset.current.y;
+      
+      const currentWidth = pipMinimized ? 60 : pipSize.width;
+      const currentHeight = pipMinimized ? 60 : pipSize.height;
+      const maxX = window.innerWidth - currentWidth;
+      const maxY = window.innerHeight - currentHeight;
+      
+      setPipPosition({
+        x: Math.max(0, Math.min(newX, maxX)),
+        y: Math.max(0, Math.min(newY, maxY))
+      });
+    }
+    
+    if (isResizingPip) {
+      const deltaX = e.clientX - pipResizeStart.current.mouseX;
+      const deltaY = e.clientY - pipResizeStart.current.mouseY;
+      
+      const newWidth = Math.max(200, Math.min(500, pipResizeStart.current.width + deltaX));
+      const newHeight = Math.max(150, Math.min(375, pipResizeStart.current.height + deltaY));
+      
+      setPipSize({ width: newWidth, height: newHeight });
+    }
+  }, [isDraggingPip, isResizingPip, pipMinimized, pipSize]);
+
+  const handlePipMouseUp = useCallback(() => {
+    setIsDraggingPip(false);
+    setIsResizingPip(false);
+  }, []);
+
+  // Resize handlers
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setIsResizingPip(true);
+    pipResizeStart.current = {
+      width: pipSize.width,
+      height: pipSize.height,
+      mouseX: e.clientX,
+      mouseY: e.clientY
+    };
+  }, [pipSize]);
+
+  // Add/remove mouse event listeners for PiP dragging and resizing
+  useEffect(() => {
+    if (isDraggingPip || isResizingPip) {
+      window.addEventListener('mousemove', handlePipMouseMove);
+      window.addEventListener('mouseup', handlePipMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handlePipMouseMove);
+      window.removeEventListener('mouseup', handlePipMouseUp);
+    };
+  }, [isDraggingPip, isResizingPip, handlePipMouseMove, handlePipMouseUp]);
+
+  // Touch support for mobile PiP dragging
+  const handlePipTouchStart = useCallback((e: React.TouchEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    if ((e.target as HTMLElement).closest('.resize-handle')) return;
+    setIsDraggingPip(true);
+    const touch = e.touches[0];
+    const rect = floatingPipRef.current?.getBoundingClientRect();
+    if (rect) {
+      pipDragOffset.current = {
+        x: touch.clientX - rect.left,
+        y: touch.clientY - rect.top
+      };
+    }
+  }, []);
+
+  const handlePipTouchMove = useCallback((e: TouchEvent) => {
+    if (!isDraggingPip && !isResizingPip) return;
+    const touch = e.touches[0];
+    
+    if (isDraggingPip) {
+      const newX = touch.clientX - pipDragOffset.current.x;
+      const newY = touch.clientY - pipDragOffset.current.y;
+      
+      const currentWidth = pipMinimized ? 60 : pipSize.width;
+      const currentHeight = pipMinimized ? 60 : pipSize.height;
+      const maxX = window.innerWidth - currentWidth;
+      const maxY = window.innerHeight - currentHeight;
+      
+      setPipPosition({
+        x: Math.max(0, Math.min(newX, maxX)),
+        y: Math.max(0, Math.min(newY, maxY))
+      });
+    }
+    
+    if (isResizingPip) {
+      const deltaX = touch.clientX - pipResizeStart.current.mouseX;
+      const deltaY = touch.clientY - pipResizeStart.current.mouseY;
+      
+      const newWidth = Math.max(200, Math.min(500, pipResizeStart.current.width + deltaX));
+      const newHeight = Math.max(150, Math.min(375, pipResizeStart.current.height + deltaY));
+      
+      setPipSize({ width: newWidth, height: newHeight });
+    }
+    e.preventDefault();
+  }, [isDraggingPip, isResizingPip, pipMinimized, pipSize]);
+
+  const handlePipTouchEnd = useCallback(() => {
+    setIsDraggingPip(false);
+    setIsResizingPip(false);
+  }, []);
+
+  // Touch resize handlers
+  const handleResizeTouchStart = useCallback((e: React.TouchEvent) => {
+    e.stopPropagation();
+    setIsResizingPip(true);
+    const touch = e.touches[0];
+    pipResizeStart.current = {
+      width: pipSize.width,
+      height: pipSize.height,
+      mouseX: touch.clientX,
+      mouseY: touch.clientY
+    };
+  }, [pipSize]);
+
+  // Add/remove touch event listeners for PiP dragging and resizing
+  useEffect(() => {
+    if (isDraggingPip || isResizingPip) {
+      window.addEventListener('touchmove', handlePipTouchMove, { passive: false });
+      window.addEventListener('touchend', handlePipTouchEnd);
+    }
+    return () => {
+      window.removeEventListener('touchmove', handlePipTouchMove);
+      window.removeEventListener('touchend', handlePipTouchEnd);
+    };
+  }, [isDraggingPip, isResizingPip, handlePipTouchMove, handlePipTouchEnd]);
+
+  // Move remote video to PiP container when pip mode is active
+  useEffect(() => {
+    const videoTrack = remoteUserRef.current?.videoTrack;
+    
+    if (!videoTrack) {
+      setPipVideoAttached(false);
+      return;
+    }
+    
+    let cancelled = false;
+    
+    // Function to attach video with retry logic
+    const attachVideo = (attempt = 1) => {
+      if (cancelled) return;
+      const maxAttempts = 3;
+      
+      if (pipModeActive && !pipMinimized && pipVideoRef.current) {
+        // Play in PiP container
+        console.log(`🎥 Attempting to attach video to PiP (attempt ${attempt})`);
+        try {
+          // Stop current playback
+          try { videoTrack.stop(); } catch (e) { /* ignore */ }
+          
+          // Clear the container first
+          if (pipVideoRef.current) {
+            pipVideoRef.current.innerHTML = '';
+          }
+          
+          // Play in PiP
+          // @ts-ignore
+          videoTrack.play(pipVideoRef.current);
+          
+          // Set attached immediately - trust Agora SDK
+          setTimeout(() => {
+            if (cancelled) return;
+            setPipVideoAttached(true);
+            console.log("🎥 Video attached to PiP container");
+          }, 100);
+          
+        } catch (e) {
+          console.error("Error moving video to PiP:", e);
+          if (attempt < maxAttempts && !cancelled) {
+            setTimeout(() => attachVideo(attempt + 1), 300);
+          } else {
+            setPipVideoAttached(false);
+          }
+        }
+      } else if ((!pipModeActive || pipMinimized) && mainVideoRef.current) {
+        // Play in main container
+        console.log(`🎥 Moving video back to main container`);
+        try {
+          try { videoTrack.stop(); } catch (e) { /* ignore */ }
+          
+          // @ts-ignore
+          videoTrack.play(mainVideoRef.current);
+          setPipVideoAttached(false);
+          console.log("🎥 Video moved back to main container");
+        } catch (e) {
+          console.error("Error moving video to main:", e);
+          if (attempt < maxAttempts && !cancelled) {
+            setTimeout(() => attachVideo(attempt + 1), 300);
+          }
+        }
+      }
+    };
+    
+    // Delay to ensure DOM is ready
+    const timer = setTimeout(() => {
+      attachVideo();
+    }, 200);
+    
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [pipModeActive, pipMinimized, remoteVideoActive]);
+
+  // Auto-enable PiP mode when game starts
+  useEffect(() => {
+    if (gameType && gameId && remoteVideoActive) {
+      // Auto-enable PiP when game starts
+      setPipModeActive(true);
+    }
+  }, [gameType, gameId, remoteVideoActive]);
+
+  // Disable PiP when game ends
+  useEffect(() => {
+    if (!gameType || !gameId) {
+      setPipModeActive(false);
+      setPipVideoAttached(false);
+    }
+  }, [gameType, gameId]);
+
+  // Sync pipModeActive ref with state for closure access
+  useEffect(() => {
+    pipModeActiveRef.current = pipModeActive;
+  }, [pipModeActive]);
+
   return (
-    <main className="space-y-4 relative">
+    <main className="space-y-6 relative p-4 lg:p-6 min-h-screen">
       {/* Gift Notification Popup */}
       {giftNotification && (
-        <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg border-2 animate-pulse ${
+        <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg border animate-scale-in backdrop-blur-glass ${
           giftNotification.isReceived 
-            ? "bg-green-900 border-green-500" 
-            : "bg-blue-900 border-blue-500"
+            ? "bg-success-muted border-success/50 shadow-[0_0_30px_var(--color-success-muted)]" 
+            : "bg-accent-muted border-accent/50 shadow-glow-purple"
         }`}>
           <div className="flex items-center gap-3">
             <span className="text-3xl">{giftNotification.isReceived ? "🎁" : "💝"}</span>
             <div>
-              <p className="font-bold text-white">
+              <p className="font-display font-bold text-txt-primary">
                 {giftNotification.isReceived ? "Gift Received!" : "Gift Sent!"}
               </p>
-              <p className="text-sm text-gray-200">
+              <p className="text-sm text-txt-secondary">
                 {giftNotification.isReceived 
                   ? `You received ${giftNotification.amount} tokens`
                   : `You sent ${giftNotification.amount} tokens`
@@ -1426,15 +1742,173 @@ export default function SessionPage() {
           </div>
           <button 
             onClick={() => setGiftNotification(null)}
-            className="absolute top-1 right-2 text-gray-400 hover:text-white text-sm"
+            className="absolute top-2 right-3 text-txt-muted hover:text-txt-primary text-sm transition-colors"
           >
             ✕
           </button>
         </div>
       )}
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      {/* Floating PiP Video Window - Shows when playing games */}
+      {gameType && gameId && videoReady && (
+        <div
+          ref={floatingPipRef}
+          onMouseDown={handlePipMouseDown}
+          onTouchStart={handlePipTouchStart}
+          className={`fixed z-[100] select-none ${isDraggingPip ? 'cursor-grabbing' : 'cursor-grab'} ${isResizingPip ? 'cursor-se-resize' : ''}`}
+          style={{
+            left: pipPosition.x,
+            top: pipPosition.y,
+            width: pipMinimized ? '60px' : `${pipSize.width}px`,
+            height: pipMinimized ? '60px' : `${pipSize.height}px`,
+            transition: isDraggingPip || isResizingPip ? 'none' : 'width 0.2s, height 0.2s',
+          }}
+        >
+          <div className={`relative w-full h-full rounded-xl overflow-hidden border-2 border-accent shadow-glow-purple bg-base ${
+            pipMinimized ? 'flex items-center justify-center' : ''
+          }`}>
+            {/* Actual video container for remote user */}
+            {!pipMinimized && (
+              <>
+                {/* Video element container - Agora will inject video here */}
+                <div 
+                  ref={pipVideoRef}
+                  className="absolute inset-0 bg-base [&>div]:!w-full [&>div]:!h-full [&>video]:!w-full [&>video]:!h-full [&>video]:!object-cover"
+                />
+                
+                {/* Fallback overlay - only shown when video not attached */}
+                {!pipVideoAttached && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-base z-[5]">
+                    {remoteVideoActive ? (
+                      <div className="text-center p-4">
+                        <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-success/20 flex items-center justify-center">
+                          <svg className="w-6 h-6 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                        </div>
+                        <p className="text-sm text-txt-secondary font-medium mb-1">Peer Video Active</p>
+                        <p className="text-xs text-txt-muted mb-3">Loading video feed...</p>
+                        <div className="w-6 h-6 mx-auto border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    ) : (
+                      <div className="text-center p-4">
+                        <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-surface-tertiary flex items-center justify-center animate-pulse">
+                          <svg className="w-6 h-6 text-txt-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
+                        </div>
+                        <p className="text-sm text-txt-muted">Waiting for peer...</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* Header bar - drag handle */}
+                <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-base/95 via-base/70 to-transparent flex items-center justify-between px-3 z-10">
+                  <span className="text-xs text-txt-primary font-medium flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${remoteVideoActive ? 'bg-success' : 'bg-warning animate-pulse'}`}></span>
+                    {pipVideoAttached ? 'Peer Video' : (remoteVideoActive ? 'Loading...' : 'Connecting...')}
+                  </span>
+                  <div className="flex items-center gap-1 opacity-60">
+                    <svg className="w-4 h-4 text-txt-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+                    </svg>
+                  </div>
+                </div>
+                
+                {/* Size indicator */}
+                <div className="absolute top-1 right-1 px-1.5 py-0.5 bg-base/70 rounded text-[9px] text-txt-muted font-mono backdrop-blur-sm">
+                  {pipSize.width}×{pipSize.height}
+                </div>
+              </>
+            )}
+            
+            {/* Minimized state */}
+            {pipMinimized && (
+              <div className="flex flex-col items-center justify-center gap-1">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${remoteVideoActive ? 'bg-success/20' : 'bg-warning/20'}`}>
+                  <svg className={`w-5 h-5 ${remoteVideoActive ? 'text-success' : 'text-warning'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <span className="text-[9px] text-txt-muted font-medium">PiP</span>
+              </div>
+            )}
+            
+            {/* Control buttons */}
+            <div className={`absolute ${pipMinimized ? 'inset-0 flex items-center justify-center' : 'bottom-2 left-2'} flex gap-1.5 pointer-events-auto z-20`}>
+              {/* Minimize/Maximize button */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const newMinimized = !pipMinimized;
+                  setPipMinimized(newMinimized);
+                  // When expanding from minimized, trigger video reattachment
+                  if (!newMinimized) {
+                    setPipVideoAttached(false); // Reset to trigger effect
+                  }
+                }}
+                className={`${pipMinimized ? 'absolute inset-0 w-full h-full opacity-0' : 'p-1.5 rounded-lg bg-surface-secondary/90 hover:bg-surface-tertiary border border-border-default'} text-txt-secondary hover:text-txt-primary transition-colors`}
+                title={pipMinimized ? "Expand" : "Minimize"}
+              >
+                {!pipMinimized && (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                  </svg>
+                )}
+              </button>
+              
+              {/* Return video to main container button (only when expanded) */}
+              {!pipMinimized && pipModeActive && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPipModeActive(false);
+                    videoContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }}
+                  className="p-1.5 rounded-lg bg-surface-secondary/90 hover:bg-surface-tertiary text-txt-secondary hover:text-txt-primary transition-colors border border-border-default"
+                  title="Return to main view"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                  </svg>
+                </button>
+              )}
+              
+              {/* Scroll to main video button */}
+              {!pipMinimized && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    videoContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }}
+                  className="p-1.5 rounded-lg bg-accent hover:bg-accent-hover text-base transition-colors shadow-sm"
+                  title="Scroll to video section"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            
+            {/* Resize handle (bottom-right corner) */}
+            {!pipMinimized && (
+              <div
+                className="resize-handle absolute bottom-0 right-0 w-6 h-6 cursor-se-resize z-30 group"
+                onMouseDown={handleResizeMouseDown}
+                onTouchStart={handleResizeTouchStart}
+              >
+                <div className="absolute bottom-1 right-1 w-3 h-3 border-r-2 border-b-2 border-accent/60 group-hover:border-accent transition-colors" />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Header Section */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center gap-4">
           <BackButton 
             href="/play" 
             label="← Back" 
@@ -1448,20 +1922,24 @@ export default function SessionPage() {
             disabledMessage="Cannot exit while trivia game is in progress!"
           />
           <div>
-            <p className="text-sm uppercase tracking-[0.25em] text-gray-400">Session</p>
-            <h1 className="text-3xl font-semibold text-white">Video Call</h1>
+            <p className="text-xs uppercase tracking-widest text-txt-muted font-medium">Session</p>
+            <h1 className="text-2xl lg:text-3xl font-display font-semibold text-txt-primary tracking-tight">
+              Video <span className="text-accent">Call</span>
+            </h1>
           </div>
         </div>
         <div className="flex items-center gap-3">
           {/* Wallet Balance Display */}
-          <div className="bg-gradient-to-r from-yellow-900 to-yellow-700 px-4 py-2 border-2 border-yellow-500 flex items-center gap-2">
+          <div className="bg-gold/10 px-4 py-2.5 rounded-lg border border-gold/30 flex items-center gap-3 shadow-glow-gold">
             <span className="text-xl">💰</span>
             <div>
-              <p className="text-xs text-yellow-300 uppercase tracking-wide">Balance</p>
-              <p className="font-bold text-white">{walletBalance.toLocaleString()} tokens</p>
+              <p className="text-[10px] text-gold uppercase tracking-wider font-medium">Balance</p>
+              <p className="font-mono font-bold text-gold text-lg leading-none">{walletBalance.toLocaleString()}</p>
             </div>
           </div>
-          <button
+          <Button
+            variant="danger"
+            size="md"
             onClick={handleEndSession}
             disabled={
               gameType === "trivia" && 
@@ -1470,128 +1948,147 @@ export default function SessionPage() {
               gameState.phase !== "gameEnd" && 
               gameState.phase !== "themeSelection"
             }
-            className={`bg-gray-800 px-4 py-2 font-semibold text-white border-2 border-white/30 ${
-              gameType === "trivia" && 
-              gameState && 
-              gameState.phase && 
-              gameState.phase !== "gameEnd" && 
-              gameState.phase !== "themeSelection"
-                ? "opacity-50 cursor-not-allowed"
-                : "hover:bg-gray-700"
-            }`}
-            title={
-              gameType === "trivia" && 
-              gameState && 
-              gameState.phase && 
-              gameState.phase !== "gameEnd" && 
-              gameState.phase !== "themeSelection"
-                ? "Cannot end session while trivia game is in progress!"
-                : ""
-            }
           >
             End Session
-          </button>
+          </Button>
         </div>
       </div>
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <p className="text-sm text-gray-400">
-            {connected ? "Connected" : "Connecting..."} | Session ID: {sessionId.slice(0, 8)}...
-            {sessionStartTime && (
-              <span className="ml-2 text-green-400">⏱ {formatDuration(sessionDuration)}</span>
-            )}
-          </p>
+      {/* Status Bar */}
+      <Card variant="glass" padding="sm" className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-4 flex-wrap">
+          {/* Connection Status */}
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${connected ? 'bg-success animate-pulse' : 'bg-warning'}`} />
+            <span className="text-sm text-txt-secondary font-medium">
+              {connected ? "Connected" : "Connecting..."}
+            </span>
+          </div>
+          
+          {/* Session Timer */}
+          {sessionStartTime && (
+            <Badge variant="success" size="md">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              {formatDuration(sessionDuration)}
+            </Badge>
+          )}
+          
+          {/* Peer Status */}
           {sessionData && (
-            <p className="text-xs text-gray-500 mt-1">
-              {peerConnected ? (
-                <span className="text-green-400">✓ Peer connected: {sessionData.peer.id.slice(0, 8)}...</span>
-              ) : (
-                <span className="text-yellow-400">⏳ Waiting for peer to join...</span>
-              )}
-            </p>
+            peerConnected ? (
+              <StatusBadge status="live" />
+            ) : (
+              <StatusBadge status="searching" />
+            )
           )}
-          {videoReady && (
-            <p className="text-xs text-gray-500 mt-1">
-              Video: {localVideoActive ? "✓ Local" : "✗ Local"} | {remoteVideoActive ? "✓ Remote" : "✗ Remote"}
-              {remoteUserInfo && (
-                <span className="ml-2">| Remote: {String(remoteUserInfo.uid).slice(0, 8)}...</span>
-              )}
-            </p>
-          )}
+          
+          {/* Network Quality */}
           {networkQuality.downlink > 0 && (
-            <p className="text-xs mt-1">
-              Network: <span className={getNetworkQualityLabel(networkQuality.downlink).color}>
-                {getNetworkQualityLabel(networkQuality.downlink).label}
-              </span>
-              {connectionState !== "CONNECTED" && connectionState !== "DISCONNECTED" && (
-                <span className="ml-2 text-yellow-400">({connectionState})</span>
-              )}
-            </p>
+            <span className={`text-sm font-medium ${getNetworkQualityLabel(networkQuality.downlink).color}`}>
+              📶 {getNetworkQualityLabel(networkQuality.downlink).label}
+            </span>
           )}
-          {error && (
-            <p className="text-sm text-red-400 mt-1">Error: {error}</p>
+          
+          {/* Connection state indicator */}
+          {connectionState !== "CONNECTED" && connectionState !== "DISCONNECTED" && (
+            <Badge variant="warning" size="sm">{connectionState}</Badge>
           )}
         </div>
+        
+        {/* Error Display */}
+        {error && (
+          <Badge variant="error" size="md">{error}</Badge>
+        )}
+        
         {/* Audio/Video Controls */}
         {videoReady && (
           <div className="flex gap-2">
-            <button
+            <Button
+              variant={isMuted ? "danger" : "secondary"}
+              size="sm"
               onClick={toggleMute}
-              className={`px-3 py-1 text-sm border-2 transition-colors ${
-                isMuted 
-                  ? "bg-red-600 border-red-500 text-white" 
-                  : "bg-gray-800 border-white/30 text-white hover:bg-gray-700"
-              }`}
-              title={isMuted ? "Unmute" : "Mute"}
+              icon={<span>{isMuted ? "🔇" : "🔊"}</span>}
             >
-              {isMuted ? "🔇 Muted" : "🔊 Audio"}
-            </button>
-            <button
+              {isMuted ? "Muted" : "Audio"}
+            </Button>
+            <Button
+              variant={isCameraOff ? "danger" : "secondary"}
+              size="sm"
               onClick={toggleCamera}
-              className={`px-3 py-1 text-sm border-2 transition-colors ${
-                isCameraOff 
-                  ? "bg-red-600 border-red-500 text-white" 
-                  : "bg-gray-800 border-white/30 text-white hover:bg-gray-700"
-              }`}
-              title={isCameraOff ? "Turn Camera On" : "Turn Camera Off"}
+              icon={<span>{isCameraOff ? "📷" : "📹"}</span>}
             >
-              {isCameraOff ? "📷 Off" : "📹 Video"}
-            </button>
+              {isCameraOff ? "Off" : "Video"}
+            </Button>
           </div>
         )}
-      </div>
+      </Card>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="bg-gray-900 p-6 border border-white/20 md:col-span-2 space-y-4">
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Main Content Area */}
+        <Card variant="elevated" padding="lg" className="lg:col-span-2 space-y-6">
           {/* Video Section */}
           <div 
             ref={videoContainerRef}
-            className="aspect-video bg-black border border-white/20 relative"
+            className="aspect-video bg-base rounded-lg border border-border-strong relative overflow-hidden shadow-lg"
           >
             {/* Main video container (shows remote by default, local when swapped) */}
             <div
               ref={mainVideoRef}
-              className="absolute inset-0 w-full h-full bg-black"
+              className="absolute inset-0 w-full h-full bg-base"
               style={{ minWidth: '100%', minHeight: '100%' }}
             />
-            {!remoteVideoActive && !videosSwapped && (
-              <div className="absolute inset-0 flex items-center justify-center text-gray-500 z-10 pointer-events-none">
-                <div className="text-center">
-                  <p className="text-sm">Waiting for remote video...</p>
-                  <p className="text-xs mt-1 text-gray-600">The other user's video will appear here</p>
+            {/* Show when video is in PiP mode */}
+            {pipModeActive && remoteVideoActive && !videosSwapped && (
+              <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+                <div className="text-center p-6 bg-surface-primary/80 backdrop-blur-sm rounded-xl border border-accent/30">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-accent/20 flex items-center justify-center">
+                    <svg className="w-8 h-8 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <p className="text-txt-primary font-medium">Video in PiP Mode</p>
+                  <p className="text-xs mt-1 text-txt-muted">Peer video is playing in the floating window</p>
+                  <button
+                    onClick={() => setPipModeActive(false)}
+                    className="mt-4 px-4 py-2 bg-accent hover:bg-accent-hover text-base text-sm font-medium rounded-lg transition-colors pointer-events-auto"
+                  >
+                    Return Video Here
+                  </button>
+                </div>
+              </div>
+            )}
+            {!remoteVideoActive && !videosSwapped && !pipModeActive && (
+              <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+                <div className="text-center p-6 bg-surface-primary/80 backdrop-blur-sm rounded-xl border border-border-default">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-surface-tertiary flex items-center justify-center">
+                    <svg className="w-8 h-8 text-txt-muted animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <p className="text-txt-secondary font-medium">Waiting for remote video...</p>
+                  <p className="text-xs mt-1 text-txt-muted">The other user's video will appear here</p>
                   {remoteUserInfo && (
-                    <p className="text-xs mt-2 text-gray-400">
-                      Remote user connected: {String(remoteUserInfo.uid).slice(0, 8)}...
-                      <br />
-                      Video track: {remoteUserInfo.hasVideo ? "✓" : "✗"} | Audio: {remoteUserInfo.hasAudio ? "✓" : "✗"}
-                    </p>
+                    <div className="mt-3 pt-3 border-t border-border-subtle">
+                      <p className="text-xs text-txt-muted">
+                        Remote user: <span className="text-accent font-mono">{String(remoteUserInfo.uid).slice(0, 8)}...</span>
+                      </p>
+                      <div className="flex items-center justify-center gap-3 mt-1">
+                        <span className={`text-xs ${remoteUserInfo.hasVideo ? 'text-success' : 'text-error'}`}>
+                          {remoteUserInfo.hasVideo ? '✓' : '✗'} Video
+                        </span>
+                        <span className={`text-xs ${remoteUserInfo.hasAudio ? 'text-success' : 'text-error'}`}>
+                          {remoteUserInfo.hasAudio ? '✓' : '✗'} Audio
+                        </span>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
             )}
             {!localVideoActive && videosSwapped && (
-              <div className="absolute inset-0 flex items-center justify-center text-gray-500 z-5">
-                <div className="text-center">
+              <div className="absolute inset-0 flex items-center justify-center z-5">
+                <div className="text-center text-txt-muted">
                   <p className="text-sm">Waiting for local video...</p>
                 </div>
               </div>
@@ -1602,7 +2099,6 @@ export default function SessionPage() {
               ref={overlayVideoRef}
               onClick={(e) => {
                 e.stopPropagation();
-                // Show context menu: swap or fullscreen
                 const choice = confirm("Click OK to swap videos, or Cancel to fullscreen");
                 if (choice) {
                   handleSwapVideos();
@@ -1611,39 +2107,51 @@ export default function SessionPage() {
                 }
               }}
               onDoubleClick={() => handleFullscreen(videoContainerRef.current!)}
-              className="absolute bottom-4 right-4 w-48 h-36 border-2 border-white bg-black z-10 cursor-pointer hover:border-gray-400 transition-all"
-              style={{ minWidth: '192px', minHeight: '144px' }}
+              className="absolute bottom-4 right-4 w-40 h-28 lg:w-48 lg:h-36 rounded-lg border-2 border-accent/50 bg-base z-10 cursor-pointer hover:border-accent hover:shadow-glow-purple transition-all overflow-hidden"
+              style={{ minWidth: '160px', minHeight: '112px' }}
               title="Click to swap, double-click to fullscreen"
             >
               {!localVideoActive && !videosSwapped && (
-                <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-xs">
-                  Your video
+                <div className="absolute inset-0 flex items-center justify-center bg-surface-primary/80 text-txt-muted text-xs">
+                  <span className="flex flex-col items-center gap-1">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    You
+                  </span>
                 </div>
               )}
               {!remoteVideoActive && videosSwapped && (
-                <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-xs">
+                <div className="absolute inset-0 flex items-center justify-center bg-surface-primary/80 text-txt-muted text-xs">
                   Other user
                 </div>
               )}
+              {/* PiP Label */}
+              <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-base/80 rounded text-[10px] text-txt-muted font-medium backdrop-blur-sm">
+                {videosSwapped ? "Peer" : "You"}
+              </div>
             </div>
             
             {/* Show loading/status overlay when video is not ready */}
             {!videoReady && (
-              <div className="absolute inset-0 flex items-center justify-center text-gray-400 z-20 bg-black bg-opacity-75">
-                <div className="text-center">
+              <div className="absolute inset-0 flex items-center justify-center z-20 bg-base/90 backdrop-blur-sm">
+                <div className="text-center p-8">
                   {sessionData?.video ? (
                     <>
-                      <p className="mb-2">Initializing video call...</p>
-                      <p className="text-xs">Please allow camera and microphone access</p>
+                      <div className="w-12 h-12 mx-auto mb-4 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+                      <p className="text-txt-primary font-medium mb-2">Initializing video call...</p>
+                      <p className="text-xs text-txt-muted">Please allow camera and microphone access</p>
                       {error && (
-                        <p className="text-xs text-red-400 mt-2 max-w-md">{error}</p>
+                        <p className="text-xs text-error mt-3 max-w-md">{error}</p>
                       )}
-                      <p className="text-xs mt-2 text-gray-500">Check browser console for details</p>
                     </>
                   ) : (
-                    <p className="text-gray-500">
-                      {connected ? "Loading session data..." : "Connecting to server..."}
-                    </p>
+                    <div className="flex flex-col items-center">
+                      <div className="w-8 h-8 mb-3 rounded-full border-2 border-txt-muted border-t-transparent animate-spin" />
+                      <p className="text-txt-muted">
+                        {connected ? "Loading session data..." : "Connecting to server..."}
+                      </p>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1652,14 +2160,20 @@ export default function SessionPage() {
 
           {/* Game Section - Always visible alongside video */}
           {gameType && gameId && (
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-white">Playing: {gameType}</h2>
-              <button
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-xl">🎮</span>
+                <h2 className="text-lg font-display font-semibold text-txt-primary">
+                  Playing: <span className="text-accent">{gameType}</span>
+                </h2>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={handleCancelGame}
-                className="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 text-white border border-white/30"
               >
                 Exit Game
-              </button>
+              </Button>
             </div>
           )}
           {gameType && gameId && gameType === "TICTACTOE" ? (
@@ -1787,137 +2301,377 @@ export default function SessionPage() {
             />
           ) : gameType && !gameId ? (
             // Game is pending/starting - show cancel option
-            <div className="bg-gray-800 p-4 border border-white/20">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm text-gray-300">Starting game: {gameType}</p>
-                <button
-                  onClick={handleCancelGame}
-                  className="text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 text-white border border-white/30"
-                >
+            <Card variant="glass" padding="md" className="animate-pulse-glow">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center animate-spin">
+                    <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full" />
+                  </div>
+                  <p className="text-sm text-txt-secondary">Starting game: <span className="text-accent font-medium">{gameType}</span></p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={handleCancelGame}>
                   Cancel
-                </button>
+                </Button>
               </div>
-              <div className="bg-black p-8 text-center text-gray-400 min-h-[200px] flex items-center justify-center">
+              <div className="bg-base/50 rounded-lg p-8 text-center min-h-[200px] flex items-center justify-center border border-border-subtle">
                 <div>
-                  <p className="text-lg mb-2">Starting {gameType}...</p>
-                  <p className="text-xs">Please wait while the game initializes</p>
+                  <p className="text-lg text-txt-primary font-display mb-2">Starting {gameType}...</p>
+                  <p className="text-xs text-txt-muted">Please wait while the game initializes</p>
                 </div>
               </div>
-            </div>
+            </Card>
           ) : gameType && gameId && gameType !== "TICTACTOE" && gameType !== "TRIVIA" && gameType !== "CHESS" && gameType !== "TRUTHS_AND_LIE" && gameType?.toUpperCase() !== "TRUTHS_AND_LIE" && gameType !== "BILLIARDS" && gameType?.toUpperCase() !== "BILLIARDS" && gameType !== "POKER" && gameType?.toUpperCase() !== "POKER" && gameType !== "TWENTY_ONE_QUESTIONS" && gameType?.toUpperCase() !== "TWENTY_ONE_QUESTIONS" ? (
-            <div className="bg-gray-800 p-4 border border-white/20">
-              <p className="text-sm text-gray-300 mb-2">Active game: {gameType} (ID: {gameId})</p>
-              <div className="bg-black p-8 text-center text-gray-400 min-h-[200px] flex items-center justify-center">
+            <Card variant="default" padding="md">
+              <p className="text-sm text-txt-secondary mb-2">Active game: {gameType} (ID: {gameId})</p>
+              <div className="bg-base/50 rounded-lg p-8 text-center min-h-[200px] flex items-center justify-center border border-border-subtle">
                 <div>
-                  <p className="text-lg mb-2">Game UI for {gameType}</p>
-                  <p className="text-xs">Game implementation coming soon or state not loaded</p>
-                  <p className="text-xs mt-2">Game State: {gameState ? "Loaded" : "Not loaded"}</p>
-                  <p className="text-xs mt-1">Debug: gameType={gameType}, gameId={gameId}</p>
+                  <p className="text-lg text-txt-primary font-display mb-2">Game UI for {gameType}</p>
+                  <p className="text-xs text-txt-muted">Game implementation coming soon or state not loaded</p>
+                  <p className="text-xs text-txt-muted mt-2">Game State: {gameState ? "Loaded" : "Not loaded"}</p>
                 </div>
               </div>
-            </div>
+            </Card>
           ) : (
-            <div className="bg-gray-800 p-4 border border-white/20">
-              <p className="text-sm text-gray-400 mb-3">Start a game</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
+            <Card variant="neon" padding="md">
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-xl">🎮</span>
+                <p className="text-sm text-txt-secondary font-medium">Choose a game to play</p>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                <Button
+                  variant="secondary"
+                  size="md"
                   onClick={() => handleStartGame("CHESS")}
-                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                  className="flex-col py-4 h-auto"
+                  icon={<span className="text-2xl mb-1">♟️</span>}
                 >
                   Chess
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="md"
                   onClick={() => handleStartGame("TRIVIA")}
-                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                  className="flex-col py-4 h-auto"
+                  icon={<span className="text-2xl mb-1">❓</span>}
                 >
                   Trivia
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="md"
                   onClick={() => handleStartGame("TICTACTOE")}
-                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                  className="flex-col py-4 h-auto"
+                  icon={<span className="text-2xl mb-1">⭕</span>}
                 >
                   Tic-Tac-Toe
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="md"
                   key="truths-and-lie-button"
                   onClick={() => {
                     console.log("Starting Truths & Lie game");
                     handleStartGame("TRUTHS_AND_LIE");
                   }}
-                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                  className="flex-col py-4 h-auto"
+                  icon={<span className="text-2xl mb-1">🤥</span>}
                 >
                   Truths & Lie
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="md"
                   onClick={() => handleStartGame("BILLIARDS")}
-                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                  className="flex-col py-4 h-auto"
+                  icon={<span className="text-2xl mb-1">🎱</span>}
                 >
                   Billiards
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="md"
                   onClick={() => handleStartGame("POKER")}
-                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                  className="flex-col py-4 h-auto"
+                  icon={<span className="text-2xl mb-1">🃏</span>}
                 >
                   Poker
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="md"
                   onClick={() => handleStartGame("TWENTY_ONE_QUESTIONS")}
-                  className="bg-white px-3 py-2 text-black text-sm hover:bg-gray-200 border-2 border-white"
+                  className="flex-col py-4 h-auto"
+                  icon={<span className="text-2xl mb-1">💬</span>}
                 >
                   21 Questions
-                </button>
+                </Button>
               </div>
-            </div>
+            </Card>
           )}
-        </div>
+        </Card>
 
-        <div className="space-y-3">
-          <div className="bg-gray-900 p-4 border border-white/20">
-            <p className="text-sm text-gray-400 mb-3">Actions</p>
-            <div className="space-y-2">
-              <button
+        {/* Sidebar */}
+        <div className="space-y-4">
+          {/* Actions Panel */}
+          <Card variant="default" padding="md">
+            <CardHeader className="mb-4">
+              <CardTitle as="h3" className="text-base flex items-center gap-2">
+                <span className="text-lg">⚡</span>
+                Quick Actions
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button
+                variant="primary"
+                size="md"
+                fullWidth
                 onClick={handleSendGift}
-                className="w-full bg-gray-800 px-4 py-2 text-white border-2 border-white/30 hover:bg-gray-700"
+                icon={<span>🎁</span>}
               >
                 Send Gift
-              </button>
-              <button
-                onClick={() => {
-                  const reason = prompt("Report reason:");
-                  if (reason && socket) {
-                    socket.emit("session.report", { sessionId, reason });
-                    alert("Report submitted");
-                  }
-                }}
-                className="w-full bg-gray-800 px-4 py-2 text-white border-2 border-white/30 hover:bg-gray-700"
+              </Button>
+              <Button
+                variant="ghost"
+                size="md"
+                fullWidth
+                onClick={handleReport}
+                icon={<span>🚩</span>}
               >
                 Report User
-              </button>
-            </div>
-          </div>
+              </Button>
+            </CardContent>
+          </Card>
 
-          <div className="bg-gray-900 p-4 border border-white/20">
-            <p className="text-sm text-gray-400 mb-2">Session Info</p>
-            <div className="text-xs text-gray-500 space-y-1">
-              <p>
-                Peer: {sessionData?.peer.id ? sessionData.peer.id.slice(0, 8) + "..." : "Loading..."}
-                {connected && sessionData?.peer?.id && (
-                  <span className="ml-2 text-green-400">✓ Connected</span>
-                )}
-              </p>
-              <p>Channel: {sessionData?.video?.channelName || "Video not available (Agora not configured)"}</p>
+          {/* Session Info Panel */}
+          <Card variant="glass" padding="md">
+            <CardHeader className="mb-3">
+              <CardTitle as="h3" className="text-base flex items-center gap-2">
+                <span className="text-lg">ℹ️</span>
+                Session Info
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {/* Peer Info */}
+              <div className="flex items-center justify-between py-2 border-b border-border-subtle">
+                <span className="text-xs text-txt-muted uppercase tracking-wide">Peer</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-txt-primary font-mono">
+                    {sessionData?.peer.id ? sessionData.peer.id.slice(0, 8) + "..." : "Loading..."}
+                  </span>
+                  {connected && sessionData?.peer?.id && (
+                    <span className="w-2 h-2 rounded-full bg-success" title="Connected" />
+                  )}
+                </div>
+              </div>
+              
+              {/* Channel */}
+              <div className="flex items-center justify-between py-2 border-b border-border-subtle">
+                <span className="text-xs text-txt-muted uppercase tracking-wide">Channel</span>
+                <span className="text-sm text-txt-secondary font-mono truncate max-w-[120px]" title={sessionData?.video?.channelName}>
+                  {sessionData?.video?.channelName?.slice(0, 12) || "—"}
+                </span>
+              </div>
+              
+              {/* Session ID */}
+              <div className="flex items-center justify-between py-2 border-b border-border-subtle">
+                <span className="text-xs text-txt-muted uppercase tracking-wide">Session</span>
+                <span className="text-sm text-txt-secondary font-mono">
+                  {sessionId.slice(0, 8)}...
+                </span>
+              </div>
+              
+              {/* Token Expiry */}
               {sessionData?.video?.expiresAt && (
-                <p>Token expires: {new Date(sessionData.video.expiresAt).toLocaleTimeString()}</p>
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-xs text-txt-muted uppercase tracking-wide">Token Expires</span>
+                  <span className="text-sm text-txt-secondary">
+                    {new Date(sessionData.video.expiresAt).toLocaleTimeString()}
+                  </span>
+                </div>
               )}
+              
+              {/* Video Disabled Notice */}
               {!sessionData?.video && (
-                <p className="text-yellow-400 text-xs mt-2">
-                  ℹ️ Video disabled - games and chat still work!
-                </p>
+                <div className="mt-2 p-2 bg-warning-muted rounded-md border border-warning/30">
+                  <p className="text-xs text-warning flex items-center gap-1">
+                    <span>ℹ️</span>
+                    Video disabled - games still work!
+                  </p>
+                </div>
               )}
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
+
+      {/* Send Gift Modal */}
+      <Modal open={giftModalOpen} onClose={() => setGiftModalOpen(false)}>
+        <ModalHeader>
+          <ModalTitle className="flex items-center gap-3">
+            <span className="text-3xl">🎁</span>
+            Send Gift
+          </ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <div className="space-y-4">
+            {/* Balance Display */}
+            <div className="flex items-center justify-between p-3 bg-gold/10 rounded-lg border border-gold/30">
+              <span className="text-sm text-txt-secondary">Your Balance</span>
+              <span className="font-mono font-bold text-gold text-lg">{walletBalance.toLocaleString()} tokens</span>
+            </div>
+            
+            {/* Amount Input */}
+            <div>
+              <label className="block text-sm text-txt-secondary mb-2">Gift Amount</label>
+              <Input
+                type="number"
+                placeholder="Enter token amount..."
+                value={giftAmount}
+                onChange={(e) => {
+                  setGiftAmount(e.target.value);
+                  setGiftError("");
+                }}
+                min={1}
+                max={walletBalance}
+                className="text-lg font-mono"
+              />
+            </div>
+            
+            {/* Quick Amount Buttons */}
+            <div className="flex gap-2 flex-wrap">
+              {[10, 25, 50, 100].filter(amt => amt <= walletBalance).map(amount => (
+                <button
+                  key={amount}
+                  onClick={() => {
+                    setGiftAmount(String(amount));
+                    setGiftError("");
+                  }}
+                  className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all ${
+                    giftAmount === String(amount)
+                      ? "bg-accent text-base border-accent shadow-glow-purple"
+                      : "bg-surface-secondary text-txt-secondary border-border-default hover:border-accent/50 hover:text-txt-primary"
+                  }`}
+                >
+                  {amount} tokens
+                </button>
+              ))}
+              {walletBalance > 0 && (
+                <button
+                  onClick={() => {
+                    setGiftAmount(String(walletBalance));
+                    setGiftError("");
+                  }}
+                  className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all ${
+                    giftAmount === String(walletBalance)
+                      ? "bg-gold/20 text-gold border-gold/50"
+                      : "bg-surface-secondary text-txt-secondary border-border-default hover:border-gold/50 hover:text-gold"
+                  }`}
+                >
+                  All ({walletBalance})
+                </button>
+              )}
+            </div>
+            
+            {/* Error Message */}
+            {giftError && (
+              <div className="p-3 bg-error-muted rounded-lg border border-error/30">
+                <p className="text-sm text-error flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {giftError}
+                </p>
+              </div>
+            )}
+            
+            {/* No Balance Warning */}
+            {walletBalance <= 0 && (
+              <div className="p-4 bg-warning-muted rounded-lg border border-warning/30 text-center">
+                <p className="text-warning font-medium mb-2">No tokens available</p>
+                <p className="text-xs text-txt-muted">Visit the Token Shop to purchase more tokens.</p>
+              </div>
+            )}
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant="ghost"
+            onClick={() => setGiftModalOpen(false)}
+            disabled={giftSending}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleConfirmGift}
+            disabled={!giftAmount || giftSending || walletBalance <= 0}
+            loading={giftSending}
+            icon={<span>💝</span>}
+          >
+            {giftSending ? "Sending..." : "Send Gift"}
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Report User Modal */}
+      <Modal open={reportModalOpen} onClose={() => setReportModalOpen(false)}>
+        <ModalHeader>
+          <ModalTitle className="flex items-center gap-3">
+            <span className="text-3xl">🚩</span>
+            Report User
+          </ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <div className="space-y-4">
+            <p className="text-txt-secondary text-sm">
+              Please describe why you are reporting this user. Our moderation team will review your report.
+            </p>
+            
+            {/* Reason Input */}
+            <Textarea
+              label="Report Reason"
+              placeholder="Describe the issue..."
+              value={reportReason}
+              onChange={(e) => setReportReason(e.target.value)}
+              rows={4}
+            />
+            
+            {/* Quick Report Options */}
+            <div className="flex flex-wrap gap-2">
+              {["Inappropriate behavior", "Harassment", "Spam", "Cheating", "Other"].map(reason => (
+                <button
+                  key={reason}
+                  onClick={() => setReportReason(reason)}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                    reportReason === reason
+                      ? "bg-error/20 text-error border-error/50"
+                      : "bg-surface-secondary text-txt-secondary border-border-default hover:border-error/30 hover:text-error"
+                  }`}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant="ghost"
+            onClick={() => setReportModalOpen(false)}
+            disabled={reportSending}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            onClick={handleConfirmReport}
+            disabled={!reportReason.trim() || reportSending}
+            loading={reportSending}
+          >
+            {reportSending ? "Submitting..." : "Submit Report"}
+          </Button>
+        </ModalFooter>
+      </Modal>
     </main>
   );
 }
