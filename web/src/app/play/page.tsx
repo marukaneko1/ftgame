@@ -2,18 +2,18 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { io, Socket } from "socket.io-client";
 import { api } from "@/lib/api";
-import BackButton from "@/components/BackButton";
-
 import { getWebSocketUrl } from "@/lib/ws-config";
+import { Button, IconButton } from "@/components/ui/Button";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
+import { Badge, StatusBadge } from "@/components/ui/Badge";
+import { ProgressBar, Spinner } from "@/components/ui/Progress";
+import { Select } from "@/components/ui/Input";
 
-// Configurable WebSocket URL
 const WS_URL = getWebSocketUrl();
-
-// Matching timeout (2 minutes)
 const MATCH_TIMEOUT_MS = 2 * 60 * 1000;
-// Max reconnection retries
 const MAX_RECONNECT_RETRIES = 3;
 
 export default function PlayPage() {
@@ -29,13 +29,9 @@ export default function PlayPage() {
   const matchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const matchDurationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Request location on mount (but don't block matchmaking if it fails)
   useEffect(() => {
     const token = localStorage.getItem("accessToken");
-    if (!token) {
-      // User not logged in, skip location update
-      return;
-    }
+    if (!token) return;
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -43,55 +39,31 @@ export default function PlayPage() {
           const { latitude, longitude } = position.coords;
           setLocation({ latitude, longitude });
           
-          // Double-check token is still available before making API call
           const currentToken = localStorage.getItem("accessToken");
-          if (!currentToken) {
-            console.log("Token no longer available, skipping location update");
-            return;
-          }
+          if (!currentToken) return;
           
-          // Update location on backend (non-blocking)
           try {
             await api.patch("/users/me/location", { latitude, longitude });
-            console.log("Location updated successfully");
           } catch (error: any) {
-            // Don't block matchmaking if location update fails
-            // 401 means unauthorized - token expired or invalid, but we'll continue anyway
-            if (error.response?.status === 401) {
-              console.log("Location update failed: authentication required (this is non-critical)");
-            } else {
-              console.warn("Failed to update location (matchmaking will still work):", error.response?.status || error.message);
-            }
+            console.warn("Failed to update location:", error.response?.status || error.message);
           }
         },
-        (error) => {
-          console.log("Location access denied or unavailable (matchmaking will still work)");
-        },
+        () => console.log("Location access denied"),
         { timeout: 5000, enableHighAccuracy: false }
       );
     }
   }, []);
 
-  // Cleanup on component unmount - prevent memory leaks and stale connections
   useEffect(() => {
     return () => {
-      // Clear all timers
-      if (matchTimeoutRef.current) {
-        clearTimeout(matchTimeoutRef.current);
-        matchTimeoutRef.current = null;
-      }
-      if (matchDurationIntervalRef.current) {
-        clearInterval(matchDurationIntervalRef.current);
-        matchDurationIntervalRef.current = null;
-      }
+      if (matchTimeoutRef.current) clearTimeout(matchTimeoutRef.current);
+      if (matchDurationIntervalRef.current) clearInterval(matchDurationIntervalRef.current);
     };
   }, []);
 
-  // Cleanup socket when it changes or component unmounts
   useEffect(() => {
     return () => {
       if (socket) {
-        console.log("[PlayPage] Cleaning up socket on unmount");
         socket.emit("match.leave");
         socket.disconnect();
       }
@@ -107,56 +79,24 @@ export default function PlayPage() {
       return;
     }
 
-    // Check if WebSocket URL suggests serverless environment (Vercel)
-    // But allow Railway URLs (which support WebSockets)
     const isVercelUrl = WS_URL.includes("vercel.app");
     const isRailwayUrl = WS_URL.includes("railway.app");
-    const isLocalhost = WS_URL.includes("localhost:3001");
     
-    // Only show error for Vercel URLs (not Railway or localhost with normal API)
     if (isVercelUrl && !isRailwayUrl) {
-      // Vercel serverless functions don't support WebSockets
-      alert(
-        "⚠️ WebSocket Connection Not Available\n\n" +
-        "WebSockets require persistent connections and are not supported in Vercel serverless functions. " +
-        "To use real-time matchmaking, you'll need to:\n\n" +
-        "1. Deploy the backend to a platform that supports WebSockets (Railway, Render, Fly.io, or a VPS)\n" +
-        "2. Update NEXT_PUBLIC_WS_URL to point to your WebSocket-enabled backend\n\n" +
-        "For now, matchmaking will not work in this environment."
-      );
+      alert("WebSocket connections are not supported in this environment.");
       return;
     }
-    
-    // Warn about localhost WebSocket in vercel dev (but don't block)
-    if (isLocalhost) {
-      console.warn("[PlayPage] WebSocket connecting to localhost:3001 - this may not work with vercel dev. Consider using Railway WebSocket URL.");
-    }
 
-    // Try to refresh token before connecting (in case it's expired)
-    // Note: When connecting from localhost to Railway, refresh token cookie might not be available (cross-origin)
-    // So we'll try refresh, but continue with existing token if it fails (it might still be valid)
     try {
-      // Attempt to refresh token - refresh token is in HTTP-only cookie
-      // When connecting from localhost to Railway, cookies might not work cross-origin
       const refreshResponse = await api.post("/auth/refresh", {}, { withCredentials: true });
       if (refreshResponse.data?.accessToken) {
         token = refreshResponse.data.accessToken as string;
         localStorage.setItem("accessToken", token);
-        console.log("[PlayPage] Token refreshed before WebSocket connection");
       }
     } catch (refreshError: any) {
-      // If refresh fails, it's likely because cookies aren't available cross-origin (localhost -> Railway)
-      // Continue with existing token - it might still be valid
-      if (refreshError.response?.status === 401 || refreshError.response?.status === 403) {
-        console.warn("[PlayPage] Token refresh failed - refresh token cookie not available (cross-origin). Using existing token.");
-        console.warn("[PlayPage] If WebSocket connection fails, please log in again from localhost to get a fresh token.");
-        // Don't redirect - try with existing token first
-      } else {
-        console.warn("[PlayPage] Token refresh failed (non-critical), using existing token");
-      }
+      console.warn("Token refresh failed, using existing token");
     }
 
-    // Ensure token exists after potential refresh
     if (!token) {
       alert("Please log in first");
       return;
@@ -165,14 +105,11 @@ export default function PlayPage() {
     setMatching(true);
     setMatchingDuration(0);
     
-    // Start duration counter
     matchDurationIntervalRef.current = setInterval(() => {
       setMatchingDuration(prev => prev + 1);
     }, 1000);
     
-    // Set matching timeout
     matchTimeoutRef.current = setTimeout(() => {
-      console.log("[PlayPage] Matching timeout reached (2 minutes)");
       if (socket) {
         socket.emit("match.leave");
         socket.disconnect();
@@ -180,47 +117,25 @@ export default function PlayPage() {
       }
       setMatching(false);
       setMatchingDuration(0);
-      alert("No match found within 2 minutes. Please try again later when more users are online.");
+      alert("No match found within 2 minutes. Please try again later.");
     }, MATCH_TIMEOUT_MS);
     
-    // Token is guaranteed to be string at this point
     const authToken = token;
-    
-    // Connect to WebSocket (using configurable URL)
-    // Socket.IO namespace /ws is configured on the backend
-    // Socket.IO client automatically uses /socket.io/ path and joins the /ws namespace
-    // For Railway: wss://omegle-gameapi-production.up.railway.app
-    // Connection: wss://omegle-gameapi-production.up.railway.app/socket.io/?ns=/ws
-    const wsUrl = WS_URL.replace(/\/$/, ''); // Remove trailing slash if present
-    
-    // Log token info for debugging (first 20 chars only)
-    console.log(`[PlayPage] Connecting to WebSocket with token: ${authToken ? authToken.substring(0, 20) + '...' : 'MISSING'}`);
+    const wsUrl = WS_URL.replace(/\/$/, '');
     
     const ws = io(`${wsUrl}/ws`, {
-      path: '/socket.io', // Explicitly set Socket.IO path (default, but explicit is better)
-      transports: ["websocket", "polling"], // Allow polling fallback for initial handshake
-      reconnection: false, // Disable auto-reconnect to handle token refresh manually
+      path: '/socket.io',
+      transports: ["websocket", "polling"],
+      reconnection: false,
       timeout: 10000,
-      withCredentials: true, // Include cookies for authentication
-      auth: { token: authToken }, // Send token in auth object (primary method)
-      query: { token: authToken }, // Also send token in query string as fallback
-      // Note: extraHeaders doesn't work reliably for WebSocket connections in Socket.IO
-      forceNew: true // Force a new connection (don't reuse existing)
+      withCredentials: true,
+      auth: { token: authToken },
+      query: { token: authToken },
+      forceNew: true
     });
 
     ws.on("connect", () => {
-      // Reset reconnect attempts on successful connection
       setReconnectAttempts(0);
-      
-      // Get fresh token on connect in case we're reconnecting
-      const currentToken = localStorage.getItem("accessToken");
-      if (currentToken && currentToken !== token) {
-        // Token was refreshed, reconnect with new token
-        ws.disconnect();
-        handleStartMatch();
-        return;
-      }
-      
       ws.emit("match.join", {
         region,
         language,
@@ -231,29 +146,14 @@ export default function PlayPage() {
 
     ws.on("match.queued", (data) => {
       console.log("Queued for matchmaking...", data);
-      // Show helpful message that you're waiting for another player
-      console.log("Waiting for another player to join the queue...");
-    });
-
-    ws.on("disconnect", () => {
-      console.log("WebSocket disconnected");
     });
 
     ws.on("match.matched", (data) => {
-      console.log("Matched!", data);
-      // Clear timeouts and intervals
-      if (matchTimeoutRef.current) {
-        clearTimeout(matchTimeoutRef.current);
-        matchTimeoutRef.current = null;
-      }
-      if (matchDurationIntervalRef.current) {
-        clearInterval(matchDurationIntervalRef.current);
-        matchDurationIntervalRef.current = null;
-      }
+      if (matchTimeoutRef.current) clearTimeout(matchTimeoutRef.current);
+      if (matchDurationIntervalRef.current) clearInterval(matchDurationIntervalRef.current);
       setMatching(false);
       setMatchingDuration(0);
       ws.disconnect();
-      // Store session data temporarily if needed
       if (data.sessionId) {
         router.push(`/session/${data.sessionId}`);
       }
@@ -261,192 +161,39 @@ export default function PlayPage() {
 
     ws.on("error", (err: any) => {
       console.error("Matchmaking error:", err);
-      // Clear timeouts and intervals
-      if (matchTimeoutRef.current) {
-        clearTimeout(matchTimeoutRef.current);
-        matchTimeoutRef.current = null;
-      }
-      if (matchDurationIntervalRef.current) {
-        clearInterval(matchDurationIntervalRef.current);
-        matchDurationIntervalRef.current = null;
-      }
-      const errorMsg = err.message || err.data?.message || "Matchmaking failed. Please check your subscription and verification status.";
+      if (matchTimeoutRef.current) clearTimeout(matchTimeoutRef.current);
+      if (matchDurationIntervalRef.current) clearInterval(matchDurationIntervalRef.current);
       
-      // Don't show alert for Agora-related errors - these are non-critical
-      // Matchmaking and games can work without video
-      if (errorMsg.includes("Agora") || errorMsg.includes("AGORA_APP_ID") || errorMsg.includes("AGORA_APP_CERTIFICATE")) {
-        console.warn("⚠️ Video setup failed (Agora not configured) - matchmaking will continue without video");
-        // Don't show alert, don't stop matching - just continue
-        return;
+      const errorMsg = err.message || err.data?.message || "Matchmaking failed.";
+      if (!errorMsg.includes("Agora")) {
+        alert(errorMsg);
+        setMatching(false);
+        setMatchingDuration(0);
+        ws.disconnect();
       }
-      
-      // For other errors, show alert and stop matching
-      alert(errorMsg);
-      setMatching(false);
-      setMatchingDuration(0);
-      ws.disconnect();
     });
 
     ws.on("connect_error", async (err: any) => {
-      console.error("[PlayPage] WebSocket connection error:", err.message, err);
-      console.error("[PlayPage] Error type:", err.type);
-      console.error("[PlayPage] Error data:", err.data);
-      
-      // Check if it's an authentication error (most common issue)
-      const isAuthError = err.message?.includes("token") || 
-                         err.message?.includes("Unauthorized") || 
-                         err.message?.includes("expired") ||
-                         err.message?.includes("Invalid") ||
-                         err.data?.message?.includes("token") ||
-                         err.data?.message?.includes("Unauthorized");
-      
-      if (isAuthError) {
-        console.error("[PlayPage] Authentication error detected. Token may be expired or invalid.");
-        console.error("[PlayPage] Current token (first 20 chars):", authToken ? authToken.substring(0, 20) + '...' : 'MISSING');
-        
-        // Clear timeouts and intervals
-        if (matchTimeoutRef.current) {
-          clearTimeout(matchTimeoutRef.current);
-          matchTimeoutRef.current = null;
-        }
-        if (matchDurationIntervalRef.current) {
-          clearInterval(matchDurationIntervalRef.current);
-          matchDurationIntervalRef.current = null;
-        }
-        setMatching(false);
-        setMatchingDuration(0);
-        ws.disconnect();
-        setSocket(null);
-        
-        alert(
-          "WebSocket authentication failed. Your session may have expired.\n\n" +
-          "Please log in again from localhost to get a fresh token."
-        );
-        router.push("/auth/login");
-        setReconnectAttempts(0);
-        return;
-      }
-      
-      // Check if this is a WebSocket connection failure (common in serverless environments)
-      const isWebSocketError = err.message?.includes("websocket") || 
-                               err.message?.includes("TransportError") ||
-                               err.type === "TransportError" ||
-                               err.message?.includes("ECONNREFUSED") ||
-                               err.message?.includes("Failed to fetch");
-      
-      if (isWebSocketError) {
-        // Check if connecting to Railway (which supports WebSockets)
-        const isRailway = WS_URL.includes('railway.app');
-        
-        // Clear timeouts and intervals
-        if (matchTimeoutRef.current) {
-          clearTimeout(matchTimeoutRef.current);
-          matchTimeoutRef.current = null;
-        }
-        if (matchDurationIntervalRef.current) {
-          clearInterval(matchDurationIntervalRef.current);
-          matchDurationIntervalRef.current = null;
-        }
-        setMatching(false);
-        setMatchingDuration(0);
-        ws.disconnect();
-        setSocket(null);
-        
-        if (isRailway) {
-          // Railway supports WebSockets, so this is likely a CORS issue
-          console.error("[PlayPage] WebSocket connection to Railway failed. This might be a CORS issue.");
-          console.error("[PlayPage] Error details:", err.message, err);
-          
-          alert(
-            "WebSocket connection to Railway failed.\n\n" +
-            "Possible causes:\n" +
-            "- Authentication token expired (try logging in again)\n" +
-            "- CORS configuration issue\n" +
-            "- Network connectivity issue\n\n" +
-            "Please check Railway logs for more details."
-          );
-        } else {
-          // Not Railway - probably Vercel or other serverless
-          console.error("[PlayPage] WebSocket connection failed - WebSockets may not be supported in this environment");
-          alert(
-            "WebSocket connection failed. " +
-            "WebSockets require persistent connections and are not supported in serverless environments like Vercel. " +
-            "For real-time matchmaking, you'll need to deploy the backend to a platform that supports WebSockets (e.g., Railway, Render, or a VPS)."
-          );
-        }
-        return;
-      }
-      
-      // If it's an auth error, try refreshing the token (refresh token is in HTTP-only cookie)
-      if (err.message?.includes("token") || err.message?.includes("Unauthorized") || err.message?.includes("expired")) {
-        console.log("[PlayPage] Auth error detected, attempting token refresh...");
-        
-        // Check retry limit to prevent infinite loop
-        if (reconnectAttempts >= MAX_RECONNECT_RETRIES) {
-          console.error("[PlayPage] Max reconnect attempts reached");
-          alert("Failed to connect after multiple attempts. Please log in again.");
-          router.push("/auth/login");
-          setMatching(false);
-          setReconnectAttempts(0);
-          return;
-        }
-        
-        try {
-          // Try to refresh - refresh token should be in HTTP-only cookie
-          const response = await api.post("/auth/refresh", {});
-          if (response.data?.accessToken) {
-            localStorage.setItem("accessToken", response.data.accessToken);
-            console.log("[PlayPage] Token refreshed successfully, retrying connection (attempt", reconnectAttempts + 1, ")");
-            // Disconnect and retry
-            ws.disconnect();
-            setMatching(false); // Reset matching state before retry
-            setReconnectAttempts(prev => prev + 1);
-            setTimeout(() => handleStartMatch(), 500);
-            return;
-          }
-        } catch (refreshError: any) {
-          console.error("[PlayPage] Failed to refresh token:", refreshError.response?.status, refreshError.message);
-          // Refresh failed, user needs to log in again
-          alert("Your session has expired. Please log in again.");
-          router.push("/auth/login");
-          setMatching(false);
-          return;
-        }
-        
-        alert("Authentication failed. Please log in again.");
-        router.push("/auth/login");
-        setMatching(false);
-        return;
-      }
-      
-      // Clear timeouts on error
-      if (matchTimeoutRef.current) {
-        clearTimeout(matchTimeoutRef.current);
-        matchTimeoutRef.current = null;
-      }
-      if (matchDurationIntervalRef.current) {
-        clearInterval(matchDurationIntervalRef.current);
-        matchDurationIntervalRef.current = null;
-      }
-      
-      alert("Failed to connect to server. Please check your connection.");
+      console.error("WebSocket connection error:", err.message);
+      if (matchTimeoutRef.current) clearTimeout(matchTimeoutRef.current);
+      if (matchDurationIntervalRef.current) clearInterval(matchDurationIntervalRef.current);
       setMatching(false);
       setMatchingDuration(0);
+      
+      if (err.message?.includes("token") || err.message?.includes("Unauthorized")) {
+        alert("Session expired. Please log in again.");
+        router.push("/auth/login");
+      } else {
+        alert("Failed to connect. Please try again.");
+      }
     });
 
     setSocket(ws);
   };
 
   const handleStopMatch = () => {
-    // Clear timeouts and intervals
-    if (matchTimeoutRef.current) {
-      clearTimeout(matchTimeoutRef.current);
-      matchTimeoutRef.current = null;
-    }
-    if (matchDurationIntervalRef.current) {
-      clearInterval(matchDurationIntervalRef.current);
-      matchDurationIntervalRef.current = null;
-    }
+    if (matchTimeoutRef.current) clearTimeout(matchTimeoutRef.current);
+    if (matchDurationIntervalRef.current) clearInterval(matchDurationIntervalRef.current);
     
     if (socket) {
       socket.emit("match.leave");
@@ -457,7 +204,6 @@ export default function PlayPage() {
     setMatchingDuration(0);
   };
 
-  // Format seconds as mm:ss
   const formatMatchingTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -465,89 +211,162 @@ export default function PlayPage() {
   };
 
   return (
-    <main className="space-y-4">
-      <div className="flex items-center justify-between mb-4">
+    <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
+      {/* Header */}
+      <header className="flex items-center justify-between">
         <div>
-          <p className="text-sm uppercase tracking-[0.25em] text-gray-400">Matchmaking</p>
-          <h1 className="text-2xl font-semibold text-white">Find a match</h1>
+          <Badge variant="accent" size="sm" className="mb-2">Matchmaking</Badge>
+          <h1 className="text-3xl font-display text-txt-primary tracking-tight">
+            Find a Match
+          </h1>
+          <p className="text-txt-secondary mt-1">
+            Connect with a random verified player
+          </p>
         </div>
-        <BackButton href="/dashboard" />
-      </div>
-      <div className="bg-gray-900 p-6 border border-white/20">
-        <p className="text-sm text-gray-400">
-          Requires active subscription, 18+ verification, and not being banned. Tokens are used for
-          optional gifts and friendly wagers; they cannot be withdrawn or converted to cash.
+        <Link href="/dashboard">
+          <Button variant="ghost" size="sm">
+            ← Back
+          </Button>
+        </Link>
+      </header>
+
+      {/* Info Card */}
+      <Card variant="glass" padding="lg">
+        <p className="text-sm text-txt-secondary">
+          Requires active subscription, 18+ verification, and not being banned. 
+          Tokens are used for optional gifts and friendly wagers — they cannot be withdrawn or converted to cash.
         </p>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <select
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-            className="bg-black px-3 py-2 text-white border border-white/30"
-          >
-            <option value="en">English (US)</option>
-          </select>
-          <select
-            value={region}
-            onChange={(e) => setRegion(e.target.value)}
-            className="bg-black px-3 py-2 text-white border border-white/30"
-          >
-            <option value="US">United States</option>
-          </select>
-          {matching ? (
-            <button
-              onClick={handleStopMatch}
-              className="bg-gray-600 px-4 py-2 font-semibold text-white hover:bg-gray-700 border-2 border-gray-500"
-            >
-              Stop matching
-            </button>
-          ) : (
-            <button
-              onClick={handleStartMatch}
-              className="bg-white px-4 py-2 font-semibold text-black hover:bg-gray-200 border-2 border-white"
-            >
-              Start match
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="bg-gray-900 p-6 border border-white/20">
+      </Card>
+
+      {/* Matchmaking Controls */}
+      <Card variant="elevated" padding="lg">
+        <CardHeader>
+          <CardTitle>Preferences</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Select
+              label="Language"
+              value={language}
+              onChange={(e: any) => setLanguage(e.target.value)}
+              options={[{ value: "en", label: "English (US)" }]}
+            />
+            <Select
+              label="Region"
+              value={region}
+              onChange={(e: any) => setRegion(e.target.value)}
+              options={[{ value: "US", label: "United States" }]}
+            />
+          </div>
+
+          <div className="mt-6">
+            {matching ? (
+              <Button
+                variant="danger"
+                size="lg"
+                fullWidth
+                onClick={handleStopMatch}
+              >
+                Stop Matching
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="lg"
+                fullWidth
+                onClick={handleStartMatch}
+                className="animate-pulse-glow"
+              >
+                Start Matching
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Matching Status */}
+      <Card variant={matching ? "neon" : "default"} padding="lg">
         {matching ? (
-          <div className="space-y-3">
+          <div className="space-y-6">
+            {/* Status Header */}
             <div className="flex items-center justify-between">
-              <p className="text-sm text-gray-400">Searching for a match...</p>
-              <p className="text-sm text-green-400 font-mono">{formatMatchingTime(matchingDuration)}</p>
+              <div className="flex items-center gap-3">
+                <Spinner size="md" />
+                <div>
+                  <p className="font-medium text-txt-primary">Searching for a match...</p>
+                  <p className="text-sm text-txt-secondary">This may take a moment</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-mono font-bold text-accent">
+                  {formatMatchingTime(matchingDuration)}
+                </p>
+                <p className="text-xs text-txt-muted">elapsed</p>
+              </div>
             </div>
-            
-            {/* Progress bar showing time remaining */}
-            <div className="w-full bg-gray-800 rounded-full h-2">
-              <div 
-                className="bg-green-500 h-2 rounded-full transition-all duration-1000"
-                style={{ width: `${Math.min(100, (matchingDuration / 120) * 100)}%` }}
+
+            {/* Progress Bar */}
+            <div>
+              <ProgressBar
+                value={matchingDuration}
+                max={120}
+                variant="accent"
+                size="lg"
+                animated
               />
+              <p className="text-xs text-txt-muted mt-2 text-center">
+                Timeout in {formatMatchingTime(120 - matchingDuration)}
+              </p>
             </div>
-            
-            <p className="text-xs text-gray-500">
-              {location 
-                ? `Location: ${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}` 
-                : "Location not available - matching by region"}
-            </p>
-            <p className="text-xs text-gray-500">
-              Waiting for another player to join... (Requires at least 2 users to match)
-            </p>
-            <p className="text-xs text-yellow-400">
-              💡 Tip: Open another browser window/tab and log in with a different account to test matching!
-            </p>
-            <p className="text-xs text-gray-500">
-              Timeout in {formatMatchingTime(120 - matchingDuration)}.
-            </p>
+
+            {/* Location Info */}
+            <div className="pt-4 border-t border-border-subtle space-y-2">
+              <p className="text-sm text-txt-tertiary">
+                {location 
+                  ? `📍 Location: ${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`
+                  : "📍 Location not available — matching by region"}
+              </p>
+              <p className="text-sm text-txt-tertiary">
+                ⏳ Waiting for another player to join the queue...
+              </p>
+              <p className="text-sm text-warning">
+                💡 Tip: Open another browser/tab with a different account to test matching!
+              </p>
+            </div>
           </div>
         ) : (
-          <p className="text-sm text-gray-400">When matched, the call screen, games, gifts, and reporting UI will appear here.</p>
+          <div className="text-center py-8">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-surface-secondary flex items-center justify-center text-3xl">
+              🎲
+            </div>
+            <h3 className="text-lg font-display text-txt-primary">Ready to Shuffle?</h3>
+            <p className="text-sm text-txt-secondary mt-2 max-w-sm mx-auto">
+              When matched, you'll enter a video call with another verified player. 
+              Play games, chat, and send gifts!
+            </p>
+          </div>
         )}
-      </div>
-    </main>
+      </Card>
+
+      {/* Game Preview */}
+      {!matching && (
+        <Card variant="glass" padding="lg">
+          <h3 className="text-lg font-display text-txt-primary mb-4">Games Available In-Session</h3>
+          <div className="grid grid-cols-4 gap-3">
+            {[
+              { icon: "♟️", name: "Chess" },
+              { icon: "❓", name: "Trivia" },
+              { icon: "⭕", name: "Tic-Tac-Toe" },
+              { icon: "🃏", name: "Poker" },
+            ].map((game) => (
+              <div key={game.name} className="text-center p-3 rounded-lg bg-surface-secondary/50">
+                <span className="text-2xl block">{game.icon}</span>
+                <span className="text-xs text-txt-muted mt-1 block">{game.name}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
   );
 }
-
-
-

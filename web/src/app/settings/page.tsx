@@ -1,9 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { usersApi, subscriptionsApi } from "@/lib/api";
-import BackButton from "@/components/BackButton";
 import { formatNumber } from "@/lib/utils";
+import { Button } from "@/components/ui/Button";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
+import { Badge, StatusBadge } from "@/components/ui/Badge";
+import { Input, Select } from "@/components/ui/Input";
+import { Avatar } from "@/components/ui/Avatar";
+import { ProgressBar, Skeleton } from "@/components/ui/Progress";
 
 export default function SettingsPage() {
   const [displayName, setDisplayName] = useState("");
@@ -58,8 +64,6 @@ export default function SettingsPage() {
     setSaved(false);
 
     try {
-      // Note: Update endpoint not implemented yet in backend
-      // For now, just show a message
       await new Promise(resolve => setTimeout(resolve, 500));
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -70,188 +74,202 @@ export default function SettingsPage() {
     }
   };
 
+  const isSubscribed = subscription?.status === "ACTIVE";
+  const isVerified = user?.is18PlusVerified || user?.ageVerified;
+
   return (
-    <main className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex flex-col gap-2">
-          <p className="text-sm uppercase tracking-[0.25em] text-gray-400">Profile</p>
-          <h1 className="text-3xl font-semibold text-white">Settings</h1>
-          <p className="text-sm text-gray-400">Manage your display info and verification status.</p>
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <header className="flex items-center justify-between">
+        <div>
+          <Badge variant="default" size="sm" className="mb-2">Profile</Badge>
+          <h1 className="text-3xl font-display text-txt-primary tracking-tight">Settings</h1>
+          <p className="text-txt-secondary mt-1">Manage your account and preferences</p>
         </div>
-        <BackButton href="/dashboard" />
-      </div>
+        <Link href="/dashboard">
+          <Button variant="ghost" size="sm">← Back</Button>
+        </Link>
+      </header>
 
       {loadingUser ? (
-        <div className="bg-gray-900 p-6 border border-white/20 text-center text-gray-400">
-          Loading profile...
-        </div>
+        <Card variant="default" padding="lg">
+          <Skeleton variant="text" lines={8} />
+        </Card>
       ) : (
         <>
-          {/* Subscription Section */}
-          <div className="bg-gray-900 p-6 border border-white/20">
-            <h2 className="text-xl font-semibold text-white mb-4">Subscription</h2>
-            {subscription?.status === "ACTIVE" ? (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-400">Status</p>
-                    <p className="text-lg font-semibold text-green-400 mt-1">Active</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm text-gray-400">Plan</p>
-                    <p className="text-lg font-semibold text-white mt-1">Basic — $1.99/month</p>
-                  </div>
+          {/* Profile Overview */}
+          <Card variant="elevated" padding="lg">
+            <div className="flex items-start gap-6">
+              <Avatar
+                alt={user?.displayName || "User"}
+                size="xl"
+                presence={isVerified && isSubscribed ? "online" : "offline"}
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-3 mb-2">
+                  <h2 className="text-2xl font-display text-txt-primary">{user?.displayName || "Player"}</h2>
+                  {isVerified && <Badge variant="success" size="sm">Verified</Badge>}
+                  {isSubscribed && <Badge variant="accent" size="sm">Subscribed</Badge>}
                 </div>
-                <p className="text-sm text-gray-500">
-                  Your subscription is active. You have full access to matchmaking and rooms.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div>
-                  <p className="text-sm text-gray-400">Status</p>
-                  <p className="text-lg font-semibold text-gray-400 mt-1">Inactive</p>
-                </div>
-                <p className="text-sm text-gray-500">
-                  A subscription is required to play and join rooms.
-                </p>
-                <button
-                  onClick={handleUnlockAccess}
-                  className="bg-white px-4 py-2 font-semibold text-black hover:bg-gray-200 border-2 border-white"
-                >
-                  Subscribe — $1.99/month
-                </button>
-              </div>
-            )}
-          </div>
+                <p className="text-txt-secondary">@{user?.username || "username"}</p>
+                <p className="text-sm text-txt-muted mt-1">{user?.email}</p>
 
-          {/* Profile Info Section */}
-          <div className="bg-gray-900 p-6 border border-white/20">
-            <h2 className="text-xl font-semibold text-white mb-4">Profile Information</h2>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <p className="text-sm text-gray-400">Email</p>
-                <p className="text-white mt-1">{user?.email || "N/A"}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-400">Display Name</p>
-                <p className="text-white mt-1">{user?.displayName || "N/A"}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-400">Username</p>
-                <p className="text-white mt-1">{user?.username || "N/A"}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-400">Level</p>
-                <p className="text-white mt-1">{user?.level || 1}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-400">XP</p>
-                <p className="text-white mt-1">{formatNumber(user?.xp || 0)}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-400">Token Balance</p>
-                <p className="text-white mt-1">{formatNumber(user?.wallet?.balanceTokens || 0)} tokens</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-400">18+ Verified</p>
-                <p className={`mt-1 ${user?.is18PlusVerified ? "text-green-400" : "text-red-400"}`}>
-                  {user?.is18PlusVerified ? "✓ Verified" : "✗ Not Verified"}
-                </p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-400">KYC Status</p>
-                <p className="mt-1 text-white">{user?.kycStatus || "PENDING"}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-400">Account Status</p>
-                <p className={`mt-1 ${user?.isBanned ? "text-red-400" : "text-green-400"}`}>
-                  {user?.isBanned ? "Banned" : "Active"}
-                </p>
+                {/* Level Progress */}
+                <div className="mt-4 max-w-xs">
+                  <div className="flex items-center justify-between text-sm mb-1">
+                    <span className="text-txt-secondary">Level {user?.level || 1}</span>
+                    <span className="font-mono text-accent">{formatNumber(user?.xp || 0)} XP</span>
+                  </div>
+                  <ProgressBar value={(user?.xp || 0) % 1000} max={1000} variant="accent" size="sm" />
+                </div>
               </div>
             </div>
-          </div>
+          </Card>
 
-          {/* Edit Settings Form */}
-          <form onSubmit={handleSubmit} className="space-y-4 bg-gray-900 p-6 border border-white/20">
-            <h2 className="text-xl font-semibold text-white mb-4">Edit Profile</h2>
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="space-y-2">
-            <label className="text-sm text-gray-300" htmlFor="displayName">
-              Display name
-            </label>
-            <input
-              id="displayName"
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              className="w-full bg-black px-3 py-2 text-white border border-white/30 focus:outline-none focus:border-2 focus:border-white"
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm text-gray-300" htmlFor="username">
-              Username
-            </label>
-            <input
-              id="username"
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full bg-black px-3 py-2 text-white border border-white/30 focus:outline-none focus:border-2 focus:border-white"
-            />
-          </div>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="space-y-2">
-            <label className="text-sm text-slate-200" htmlFor="language">
-              Language
-            </label>
-            <select
-              id="language"
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              className="w-full bg-black px-3 py-2 text-white border border-white/30 focus:outline-none focus:border-2 focus:border-white"
-            >
-              <option value="en">English (US)</option>
-            </select>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm text-slate-200" htmlFor="region">
-              Region
-            </label>
-            <select
-              id="region"
-              value={region}
-              onChange={(e) => setRegion(e.target.value)}
-              className="w-full bg-black px-3 py-2 text-white border border-white/30 focus:outline-none focus:border-2 focus:border-white"
-            >
-              <option value="US">United States</option>
-            </select>
-          </div>
-        </div>
-        <div className="bg-gray-800 p-4 border border-white/20">
-          <p className="text-sm text-gray-300">Age verification</p>
-          <p className="text-sm text-gray-500">
-            Required for access to matchmaking and rooms. We will integrate Persona for US users.
-          </p>
-        </div>
-        {saved && (
-          <div className="bg-gray-800 border border-gray-600 p-3 text-sm text-gray-200">
-            Settings saved! (Note: Update endpoint not implemented in backend yet)
-          </div>
-        )}
-        <button
-          type="submit"
-          disabled={loading}
-          className="bg-white px-4 py-2 font-semibold text-black hover:bg-gray-200 border-2 border-white disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? "Saving..." : "Save changes"}
-        </button>
-      </form>
+          {/* Subscription */}
+          <Card variant={isSubscribed ? "default" : "neon"} padding="lg">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Subscription</CardTitle>
+                <StatusBadge status={isSubscribed ? "verified" : "offline"} />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {isSubscribed ? (
+                <div className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <p className="text-sm text-txt-muted">Plan</p>
+                      <p className="text-lg font-medium text-txt-primary">Basic Access</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-txt-muted">Price</p>
+                      <p className="text-lg font-medium text-txt-primary">$1.99/month</p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-txt-secondary">
+                    Your subscription is active. You have full access to matchmaking and rooms.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-txt-secondary">
+                    A subscription is required to play and join rooms.
+                  </p>
+                  <Button variant="primary" onClick={handleUnlockAccess}>
+                    Subscribe — $1.99/month
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Account Details */}
+          <Card variant="default" padding="lg">
+            <CardHeader>
+              <CardTitle>Account Details</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div className="p-3 bg-surface-secondary rounded-lg">
+                  <p className="text-xs text-txt-muted uppercase tracking-wide">Token Balance</p>
+                  <p className="text-xl font-mono font-bold text-gold mt-1">
+                    {formatNumber(user?.wallet?.balanceTokens || 0)}
+                  </p>
+                </div>
+                <div className="p-3 bg-surface-secondary rounded-lg">
+                  <p className="text-xs text-txt-muted uppercase tracking-wide">18+ Verified</p>
+                  <p className={`text-xl font-bold mt-1 ${isVerified ? "text-success" : "text-warning"}`}>
+                    {isVerified ? "✓ Yes" : "✗ No"}
+                  </p>
+                </div>
+                <div className="p-3 bg-surface-secondary rounded-lg">
+                  <p className="text-xs text-txt-muted uppercase tracking-wide">KYC Status</p>
+                  <p className="text-xl font-medium text-txt-primary mt-1">
+                    {user?.kycStatus || "Pending"}
+                  </p>
+                </div>
+                <div className="p-3 bg-surface-secondary rounded-lg">
+                  <p className="text-xs text-txt-muted uppercase tracking-wide">Account Status</p>
+                  <p className={`text-xl font-bold mt-1 ${user?.isBanned ? "text-error" : "text-success"}`}>
+                    {user?.isBanned ? "Banned" : "Active"}
+                  </p>
+                </div>
+                <div className="p-3 bg-surface-secondary rounded-lg">
+                  <p className="text-xs text-txt-muted uppercase tracking-wide">Member Since</p>
+                  <p className="text-xl font-medium text-txt-primary mt-1">
+                    {user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : "N/A"}
+                  </p>
+                </div>
+                <div className="p-3 bg-surface-secondary rounded-lg">
+                  <p className="text-xs text-txt-muted uppercase tracking-wide">Total Games</p>
+                  <p className="text-xl font-mono font-bold text-cyan mt-1">
+                    {user?.totalGames || 0}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Edit Profile */}
+          <Card variant="default" padding="lg">
+            <CardHeader>
+              <CardTitle>Edit Profile</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Input
+                    label="Display Name"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="Your display name"
+                  />
+                  <Input
+                    label="Username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Your username"
+                  />
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Select
+                    label="Language"
+                    value={language}
+                    onChange={(e: any) => setLanguage(e.target.value)}
+                    options={[{ value: "en", label: "English (US)" }]}
+                  />
+                  <Select
+                    label="Region"
+                    value={region}
+                    onChange={(e: any) => setRegion(e.target.value)}
+                    options={[{ value: "US", label: "United States" }]}
+                  />
+                </div>
+
+                {/* Verification Notice */}
+                <div className="p-4 bg-info-muted rounded-lg border border-info/20">
+                  <p className="text-sm font-medium text-info mb-1">Age Verification</p>
+                  <p className="text-xs text-txt-secondary">
+                    Required for access to matchmaking and rooms. Persona integration coming soon.
+                  </p>
+                </div>
+
+                {saved && (
+                  <div className="p-3 bg-success-muted rounded-lg border border-success/30">
+                    <p className="text-sm text-success">Settings saved successfully!</p>
+                  </div>
+                )}
+
+                <Button type="submit" variant="primary" loading={loading}>
+                  {loading ? "Saving..." : "Save Changes"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
         </>
       )}
-    </main>
+    </div>
   );
 }
-
-

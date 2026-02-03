@@ -1,11 +1,11 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { Button } from "@/components/ui/Button";
 
 interface BackButtonProps {
-  href?: string;
+  href: string;
   label?: string;
-  className?: string;
   disabled?: boolean;
   disabledMessage?: string;
 }
@@ -13,37 +13,28 @@ interface BackButtonProps {
 export default function BackButton({ 
   href, 
   label = "← Back", 
-  className = "",
   disabled = false,
-  disabledMessage = "Cannot exit during game"
+  disabledMessage 
 }: BackButtonProps) {
-  const router = useRouter();
-
-  const handleClick = () => {
-    if (disabled) {
-      alert(disabledMessage);
-      return;
-    }
-    if (href) {
-      router.push(href);
-    } else {
-      router.back();
-    }
-  };
+  if (disabled) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled
+        onClick={() => disabledMessage && alert(disabledMessage)}
+        title={disabledMessage}
+      >
+        {label}
+      </Button>
+    );
+  }
 
   return (
-    <button
-      onClick={handleClick}
-      disabled={disabled}
-      className={`bg-gray-800 px-4 py-2 text-white border border-white/30 ${
-        disabled 
-          ? "opacity-50 cursor-not-allowed" 
-          : "hover:bg-gray-700"
-      } ${className}`}
-      title={disabled ? disabledMessage : ""}
-    >
-      {label}
-    </button>
+    <Link href={href}>
+      <Button variant="ghost" size="sm">
+        {label}
+      </Button>
+    </Link>
   );
 }
-

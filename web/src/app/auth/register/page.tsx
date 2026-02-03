@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { authApi } from "@/lib/api";
-import BackButton from "@/components/BackButton";
+import { Button } from "@/components/ui/Button";
+import { Card, CardContent } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
+import { Badge } from "@/components/ui/Badge";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -13,6 +16,7 @@ export default function RegisterPage() {
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
+  const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -27,31 +31,20 @@ export default function RegisterPage() {
     } catch (err: any) {
       console.error("Registration error:", err);
       
-      // Handle different error formats
       let errorMessage = "Registration failed. Please try again.";
       
       if (err.response?.data) {
         const data = err.response.data;
-        
-        // Handle validation errors (array format)
         if (Array.isArray(data.message)) {
           errorMessage = data.message.join(". ");
-        }
-        // Handle single message string
-        else if (typeof data.message === "string") {
+        } else if (typeof data.message === "string") {
           errorMessage = data.message;
-        }
-        // Handle error object format
-        else if (data.error && Array.isArray(data.message)) {
+        } else if (data.error && Array.isArray(data.message)) {
           errorMessage = `${data.error}: ${data.message.join(". ")}`;
         }
-      }
-      // Handle network errors
-      else if (err.message && err.message.includes("Network Error")) {
+      } else if (err.message && err.message.includes("Network Error")) {
         errorMessage = "Cannot connect to server. Please check that the API server is running.";
-      }
-      // Handle other errors
-      else if (err.message) {
+      } else if (err.message) {
         errorMessage = err.message;
       }
       
@@ -62,114 +55,148 @@ export default function RegisterPage() {
   };
 
   return (
-    <main className="space-y-4">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex flex-col gap-2">
-          <p className="text-sm uppercase tracking-[0.25em] text-gray-400">Authentication</p>
-          <h1 className="text-3xl font-semibold text-white">Sign up</h1>
-          <p className="text-sm text-gray-400">Create a new account to get started.</p>
+    <div className="min-h-[70vh] flex items-center justify-center py-8 animate-fade-in">
+      <div className="w-full max-w-md space-y-6">
+        {/* Header */}
+        <div className="text-center">
+          <Link href="/" className="inline-flex items-center gap-2 mb-6 group">
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-accent to-cyan flex items-center justify-center shadow-glow-purple">
+              <span className="text-xl font-bold text-base">S</span>
+            </div>
+            <span className="text-lg font-display text-txt-primary">Shitbox Shuffle</span>
+          </Link>
+          <Badge variant="accent" size="sm" className="mb-4">Join the Community</Badge>
+          <h1 className="text-3xl font-display text-txt-primary tracking-tight">Create account</h1>
+          <p className="text-txt-secondary mt-2">Sign up to start matching and playing</p>
         </div>
-        <BackButton href="/" />
+
+        {/* Register Card */}
+        <Card variant="elevated" padding="lg" className="relative overflow-hidden">
+          {/* Inner highlight */}
+          <div className="absolute top-0 left-[10%] right-[10%] h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+          
+          <CardContent>
+            {/* Notice */}
+            <div className="mb-6 p-3 bg-warning-muted rounded-lg border border-warning/20">
+              <p className="text-xs text-warning font-medium mb-1">US-Only • 18+ Required</p>
+              <p className="text-xs text-txt-secondary">
+                You must be 18 or older and physically in the United States to use this service.
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {error && (
+                <div className="p-3 bg-error-muted rounded-lg border border-error/30">
+                  <p className="text-sm text-error">{error}</p>
+                </div>
+              )}
+
+              <Input
+                label="Email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                icon={
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
+                  </svg>
+                }
+              />
+
+              <div className="grid grid-cols-2 gap-4">
+                <Input
+                  label="Display Name"
+                  type="text"
+                  required
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="John"
+                />
+                <Input
+                  label="Username"
+                  type="text"
+                  required
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="johndoe"
+                />
+              </div>
+
+              <Input
+                label="Password"
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                hint="Minimum 8 characters"
+                icon={
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                }
+              />
+
+              <Input
+                label="Date of Birth"
+                type="date"
+                required
+                value={dateOfBirth}
+                onChange={(e) => setDateOfBirth(e.target.value)}
+              />
+
+              {/* Age Confirmation */}
+              <label className="flex items-start gap-3 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  required
+                  checked={agreed}
+                  onChange={(e) => setAgreed(e.target.checked)}
+                  className="mt-1 w-4 h-4 rounded border-border-default bg-surface-primary accent-accent cursor-pointer"
+                />
+                <span className="text-sm text-txt-secondary group-hover:text-txt-primary transition-colors">
+                  I confirm I am <span className="text-warning font-medium">18 years or older</span> and currently located in the <span className="text-info font-medium">United States</span>.
+                </span>
+              </label>
+
+              <Button
+                type="submit"
+                variant="primary"
+                size="lg"
+                fullWidth
+                loading={loading}
+                disabled={!agreed}
+              >
+                {loading ? "Creating account..." : "Create Account"}
+              </Button>
+            </form>
+
+            {/* Terms */}
+            <p className="mt-4 text-xs text-txt-muted text-center">
+              By creating an account, you agree to our{" "}
+              <a href="#" className="text-accent hover:underline">Terms of Service</a> and{" "}
+              <a href="#" className="text-accent hover:underline">Privacy Policy</a>.
+            </p>
+
+            {/* Login link */}
+            <p className="mt-6 text-center text-sm text-txt-secondary">
+              Already have an account?{" "}
+              <Link href="/auth/login" className="text-accent hover:text-accent-hover font-medium transition-colors">
+                Sign in
+              </Link>
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* Back to home */}
+        <div className="text-center">
+          <Link href="/" className="text-sm text-txt-muted hover:text-txt-secondary transition-colors">
+            ← Back to home
+          </Link>
+        </div>
       </div>
-      <div className="max-w-md space-y-6 bg-gray-900 p-8 shadow border border-white/20">
-        <div className="space-y-2">
-          <p className="text-sm uppercase tracking-[0.25em] text-gray-400">US-only</p>
-          <p className="text-sm text-gray-400">
-            You must be 18 or older and physically in the United States to use this service.
-          </p>
-        </div>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {error && (
-          <div className="bg-gray-800 border border-gray-600 p-3 text-sm text-gray-200">
-            {error}
-          </div>
-        )}
-        <div className="space-y-2">
-          <label className="text-sm text-gray-300" htmlFor="email">
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full bg-black px-3 py-2 text-white border border-white/30 focus:outline-none focus:border-2 focus:border-white"
-          />
-        </div>
-        <div className="space-y-2">
-          <label className="text-sm text-gray-300" htmlFor="displayName">
-            Display name
-          </label>
-          <input
-            id="displayName"
-            type="text"
-            required
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            className="w-full bg-black px-3 py-2 text-white border border-white/30 focus:outline-none focus:border-2 focus:border-white"
-          />
-        </div>
-        <div className="space-y-2">
-          <label className="text-sm text-gray-300" htmlFor="username">
-            Username
-          </label>
-          <input
-            id="username"
-            type="text"
-            required
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            className="w-full bg-black px-3 py-2 text-white border border-white/30 focus:outline-none focus:border-2 focus:border-white"
-          />
-        </div>
-        <div className="space-y-2">
-          <label className="text-sm text-gray-300" htmlFor="password">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full bg-black px-3 py-2 text-white border border-white/30 focus:outline-none focus:border-2 focus:border-white"
-          />
-        </div>
-        <div className="space-y-2">
-          <label className="text-sm text-gray-300" htmlFor="dob">
-            Date of birth
-          </label>
-          <input
-            id="dob"
-            type="date"
-            required
-            value={dateOfBirth}
-            onChange={(e) => setDateOfBirth(e.target.value)}
-            className="w-full bg-black px-3 py-2 text-white border border-white/30 focus:outline-none focus:border-2 focus:border-white"
-          />
-        </div>
-        <label className="flex items-start gap-3 text-sm text-slate-200">
-          <input type="checkbox" required className="mt-1" /> I confirm I am 18 or older and located in
-          the United States.
-        </label>
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-white px-4 py-2 font-semibold text-black hover:bg-gray-200 border-2 border-white disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? "Creating account..." : "Continue"}
-        </button>
-      </form>
-      <p className="text-sm text-gray-400">
-        Already have an account?{" "}
-        <Link className="text-white hover:text-gray-300 underline" href="/auth/login">
-          Log in
-        </Link>
-      </p>
-      </div>
-    </main>
+    </div>
   );
 }
-
-

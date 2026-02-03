@@ -9,6 +9,8 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\" --names \"API,WEB\" --prefix-colors \"cyan,yellow\"",
+    "dev:web-only": "npm --workspace web run dev",
+    "dev:kill-ports": "lsof -ti:3000 | xargs kill -9 2>/dev/null; lsof -ti:3001 | xargs kill -9 2>/dev/null; true",
     "dev:api": "npm --workspace api run start:dev",
     "dev:web": "npm --workspace web run dev",
     "dev:vercel": "concurrently \"npm run dev:vercel:api\" \"npm run dev:vercel:web\" --names \"VERCEL-API,VERCEL-WEB\" --prefix-colors \"cyan,yellow\"",
